@@ -1,0 +1,10 @@
+{
+  "codex_window_keywords": ["Codex", "ChatGPT"],
+  "codex_process_names": ["Codex.exe", "ChatGPT.exe"],
+  "transcription_wait_ms": 900,
+  "copy_wait_ms": 250,
+  "paste_wait_ms": 150,
+  "button_size": 64,
+  "position_x": null,
+  "position_y": null
+}
