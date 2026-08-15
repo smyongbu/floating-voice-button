@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>悬浮语音按钮 · 设置与历史记录</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="设置导航">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3.5a3.5 3.5 0 0 0-3.5 3.5v5a3.5 3.5 0 0 0 7 0V7A3.5 3.5 0 0 0 12 3.5Z"/>
+            <path d="M5.8 11.7v.5a6.2 6.2 0 0 0 12.4 0v-.5M12 18.4v2.1M8.8 20.5h6.4"/>
+          </svg>
+        </span>
+        <div>
+          <strong>悬浮语音按钮</strong>
+          <span>设置与历史记录</span>
+        </div>
+      </div>
+
+      <nav class="nav-list">
+        <button class="nav-item is-active" type="button" data-view="appearance" aria-selected="true">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 0-3.6h-1a1.5 1.5 0 0 1 0-3h2.6A6.2 6.2 0 0 0 21 8.2C21 5.3 17 3 12 3Z"/>
+            <circle cx="7.5" cy="9" r=".8" fill="currentColor" stroke="none"/>
+            <circle cx="10.2" cy="6.8" r=".8" fill="currentColor" stroke="none"/>
+            <circle cx="14" cy="6.5" r=".8" fill="currentColor" stroke="none"/>
+          </svg>
+          <span>按钮设置</span>
+        </button>
+        <button class="nav-item" type="button" data-view="localModel" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3 4.5 7v10L12 21l7.5-4V7L12 3Z"/><path d="m4.8 7.2 7.2 4 7.2-4M12 11.2V21"/>
+          </svg>
+          <span>本地模式</span>
+        </button>
+        <button class="nav-item" type="button" data-view="onlineModel" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M7.5 18.5h9.2a4.3 4.3 0 0 0 .5-8.6A6 6 0 0 0 5.8 8.4a5.1 5.1 0 0 0 1.7 10.1Z"/><path d="m9 14 3-3 3 3M12 11v6"/>
+          </svg>
+          <span>在线模型</span>
+        </button>
+        <button class="nav-item" type="button" data-view="history" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3.5 12a8.5 8.5 0 1 0 2.1-5.6M3.5 4v5h5M12 7.3V12l3.1 1.8"/>
+          </svg>
+          <span>识别历史</span>
+          <span class="nav-count" id="navHistoryCount">0</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M7 10V7a5 5 0 0 1 10 0v3M5.5 10h13v10h-13zM12 14v2"/>
+        </svg>
+        <span id="sidebarPrivacyText">本地模式不会上传录音</span>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <section class="view is-active" id="appearanceView" aria-labelledby="appearanceTitle">
+        <header class="page-header">
+          <div>
+            <h1 id="appearanceTitle">按钮设置</h1>
+            <p>调整悬浮按钮外观与全局录音快捷键，保存后立即应用。</p>
+          </div>
+          <span class="save-state" id="saveState"><i></i>设置已同步</span>
+        </header>
+
+        <div class="appearance-grid">
+          <article class="card preview-card">
+            <div class="card-heading">
+              <div>
+                <h2>按钮外观</h2>
+              </div>
+            </div>
+
+            <div class="checkerboard">
+              <div class="preview-state">
+                <div class="preview-button" data-preview-button>
+                  <svg class="preview-mic" viewBox="0 0 72 72" fill="none" aria-hidden="true">
+                    <rect x="30" y="19" width="12" height="24" rx="6"/>
+                    <path d="M25 31v1a11 11 0 0 0 22 0v-1M36 43v10M29.5 53h13"/>
+                  </svg>
+                </div>
+                <span>待机</span>
+              </div>
+              <div class="preview-state">
+                <div class="preview-button" data-preview-button>
+                  <div class="preview-wave" aria-hidden="true">
+                    <i class="wave-xs"></i><i class="wave-sm"></i>
+                    <i class="wave-md"></i><i class="wave-lg"></i>
+                    <i class="wave-md"></i><i class="wave-sm"></i>
+                    <i class="wave-xs"></i>
+                  </div>
+                </div>
+                <span>录音</span>
+              </div>
+            </div>
+
+            <div class="field-group appearance-color-group">
+              <label for="colorText">按钮颜色</label>
+              <div class="color-control">
+                <input id="colorPicker" class="color-picker" type="color" value="#2563EB" aria-label="选择按钮颜色">
+                <div class="text-field color-text-field">
+                  <span id="colorSwatch" aria-hidden="true"></span>
+                  <input id="colorText" type="text" value="#2563EB" maxlength="7" spellcheck="false" autocomplete="off">
+                </div>
+              </div>
+              <div class="swatches" aria-label="常用颜色">
+                <button class="swatch-blue" type="button" data-color="#2563EB" aria-label="经典蓝"></button>
+                <button class="swatch-violet" type="button" data-color="#7C3AED" aria-label="紫色"></button>
+                <button class="swatch-teal" type="button" data-color="#0D9488" aria-label="青绿色"></button>
+                <button class="swatch-pink" type="button" data-color="#DB2777" aria-label="玫红色"></button>
+                <button class="swatch-orange" type="button" data-color="#EA580C" aria-label="橙色"></button>
+              </div>
+              <p class="field-error" id="colorError" role="alert"></p>
+            </div>
+
+            <div class="field-group opacity-group">
+              <div class="label-row">
+                <label for="opacityRange">透明度</label>
+                <output id="opacityOutput" for="opacityRange">100%</output>
+              </div>
+              <input id="opacityRange" type="range" min="30" max="100" step="1" value="100">
+              <div class="range-labels"><span>更透明</span><span>完全不透明</span></div>
+            </div>
+
+          </article>
+
+          <article class="card controls-card">
+            <div class="card-heading">
+              <div>
+                <h2>录音控制</h2>
+              </div>
+            </div>
+
+            <div class="field-group hotkey-group">
+              <label for="hotkeyInput">全局录音快捷键</label>
+              <div class="hotkey-control">
+                <div class="text-field hotkey-field">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M18 10h.01M7 14h7M17 14h.01"/></svg>
+                  <input id="hotkeyInput" type="text" value="Ctrl+Alt+Space" maxlength="40" spellcheck="false" autocomplete="off" aria-describedby="hotkeyHint hotkeyError hotkeyStatus">
+                </div>
+                <button class="button button-secondary hotkey-test-button" id="hotkeyTestButton" type="button">测试</button>
+              </div>
+              <p class="field-hint" id="hotkeyHint">可直接使用 F1～F24，也可填写 Ctrl+Alt+Space；按一次开始，再按一次停止。</p>
+              <p class="field-error" id="hotkeyError" role="alert"></p>
+              <p class="field-status" id="hotkeyStatus" aria-live="polite"></p>
+            </div>
+
+            <div class="field-group standby-group">
+              <div class="standby-row">
+                <div>
+                  <label for="standbyToggle">待命模式</label>
+                  <p>把“开始”单独说出即可录音；正文说完稍停，再单独说“结束”，文字只保存到识别历史。</p>
+                </div>
+                <label class="switch" for="standbyToggle">
+                  <input id="standbyToggle" type="checkbox" role="switch">
+                  <span aria-hidden="true"></span>
+                  <b>关闭</b>
+                </label>
+              </div>
+              <p class="privacy-note">使用本地 Zipformer 轻量模型识别“开始／结束”，只用处理器运行；安静时显示平线，讲话时随收音跳动，待命音频不会上传。</p>
+            </div>
+
+            <div class="controls-footer">
+              <button class="button button-secondary" id="resetButton" type="button">恢复默认</button>
+              <button class="button button-primary" id="saveButton" type="button">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+                <span>保存并应用</span>
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="localModelView" aria-labelledby="localModelTitle" hidden>
+        <header class="page-header">
+          <div>
+            <h1 id="localModelTitle">本地模式</h1>
+            <p>选择文字出现方式、本地识别模型和运行设备。</p>
+          </div>
+          <span class="save-state" id="localModelState"><i></i>正在检查</span>
+        </header>
+
+        <div class="recognition-stack">
+          <section class="card recognition-card" aria-labelledby="localEngineHeading">
+            <div class="section-heading">
+              <div>
+                <h2 id="localEngineHeading">本地识别设置</h2>
+                <p>录音和识别都在本机完成，不会上传语音。</p>
+              </div>
+            </div>
+            <div class="mode-setting">
+              <h3>文字出现方式</h3>
+              <fieldset class="mode-options" id="recognitionModeOptions" aria-describedby="recognitionModeHint">
+                <legend class="sr-only">选择文字出现方式</legend>
+                <label class="mode-option">
+                  <input type="radio" name="recognitionMode" value="realtime">
+                  <span><b>实时识别</b><small>边说边显示文字</small></span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="recognitionMode" value="batch">
+                  <span><b>整段识别</b><small>停止录音后再转换</small></span>
+                </label>
+              </fieldset>
+              <p id="recognitionModeHint" aria-live="polite">实时文字显示在悬浮按钮上方，录音结束后只向原软件粘贴一次。</p>
+            </div>
+            <h3 class="engine-subheading">本地识别模型</h3>
+            <fieldset class="engine-options" id="localEngineOptions">
+              <legend class="sr-only">选择本地识别模型</legend>
+            </fieldset>
+          </section>
+
+          <section class="card recognition-card" aria-labelledby="localModelsHeading">
+            <div class="section-heading">
+              <div>
+                <h2 id="localModelsHeading">本地模型与性能要求</h2>
+                <p>性能要求是保守估算，实际速度会随处理器代际和录音长度变化。</p>
+              </div>
+            </div>
+            <div class="local-model-list" id="localModelList" aria-live="polite"></div>
+
+            <fieldset class="device-options compact-device-options" id="deviceOptions">
+              <legend>本地模型运行设备</legend>
+              <label><input type="radio" name="modelDevicePreference" value="auto"><span><b>自动选择</b><small>优先兼容的显卡，不可用时使用处理器</small></span></label>
+              <label><input type="radio" name="modelDevicePreference" value="cpu"><span><b>使用处理器</b><small>兼容性最好，适合普通电脑和虚拟机</small></span></label>
+              <label><input type="radio" name="modelDevicePreference" value="gpu"><span><b>使用显卡</b><small>需要兼容显卡和相应运行组件</small></span></label>
+            </fieldset>
+            <p class="field-status" id="modelTestStatus" aria-live="polite"></p>
+          </section>
+
+          <div class="model-save-bar">
+            <p id="localRecognitionSummary">默认使用本地识别，不会上传录音。</p>
+            <button class="button button-primary" id="localModelSaveButton" type="button">保存并应用</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="onlineModelView" aria-labelledby="onlineModelTitle" hidden>
+        <header class="page-header">
+          <div>
+            <h1 id="onlineModelTitle">在线模型</h1>
+            <p>选择国内在线识别服务，并管理本机保存的服务凭据。</p>
+          </div>
+          <span class="save-state" id="onlineModelState"><i></i>正在检查</span>
+        </header>
+
+        <div class="recognition-stack">
+          <section class="card recognition-card" aria-labelledby="onlineEngineHeading">
+            <div class="section-heading">
+              <div>
+                <h2 id="onlineEngineHeading">在线识别设置</h2>
+                <p>只有已保存凭据的服务可以设为当前识别模型。</p>
+              </div>
+            </div>
+            <fieldset class="engine-options" id="onlineEngineOptions">
+              <legend class="sr-only">选择在线识别模型</legend>
+            </fieldset>
+            <div class="fallback-setting">
+              <label for="fallbackModel">在线失败时的本地备用模型</label>
+              <select id="fallbackModel"></select>
+              <p>只在网络或服务临时故障时回退；密钥、欠费或参数错误会直接提示。</p>
+            </div>
+          </section>
+
+          <section class="card recognition-card" aria-labelledby="cloudProvidersHeading">
+            <div class="section-heading">
+              <div>
+                <h2 id="cloudProvidersHeading">国内在线识别服务</h2>
+                <p>已接入火山引擎、科大讯飞、腾讯云和阿里云；不包含百度。</p>
+              </div>
+            </div>
+            <div class="upload-notice">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 3.5 6.5V12c0 4.7 3.5 7.7 8.5 9 5-1.3 8.5-4.3 8.5-9V6.5L12 3Z"/><path d="M9 12h6M12 9v6"/></svg>
+              <p><strong>隐私与费用提示</strong><span>启用在线服务会把本次完整录音上传给所选厂商，并可能产生费用。在线录音最长 55 秒。</span></p>
+            </div>
+            <div class="provider-list" id="providerList"></div>
+          </section>
+
+          <div class="model-save-bar">
+            <p id="onlineRecognitionSummary">在线识别会上传本次完整录音。</p>
+            <button class="button button-primary" id="onlineModelSaveButton" type="button">保存并应用</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="historyView" aria-labelledby="historyTitle" hidden>
+        <h1 class="sr-only" id="historyTitle">识别历史</h1>
+        <div class="history-layout">
+          <div class="history-list-pane">
+            <div class="history-list-toolbar">
+              <label class="search-box" for="historySearch">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+                <input id="historySearch" type="search" placeholder="搜索历史文字" autocomplete="off">
+                <kbd>Ctrl F</kbd>
+              </label>
+            </div>
+            <div class="history-list-body">
+              <div class="history-list" id="historyList" role="listbox" aria-label="识别历史列表"></div>
+              <div class="empty-state" id="historyEmpty" hidden>
+                <span class="empty-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v14H4zM8 3h8v3M8 11h8M8 15h5"/></svg>
+                </span>
+                <strong>还没有识别记录</strong>
+                <p>完成一次语音输入后会显示在这里。</p>
+              </div>
+            </div>
+          </div>
+
+          <article class="history-detail" id="historyDetail">
+            <div class="detail-toolbar">
+              <span id="detailTime">选择一条记录查看全文</span>
+              <div class="detail-toolbar-actions">
+                <span id="historyCount">0 条记录</span>
+                <button class="icon-button" id="refreshButton" type="button" aria-label="刷新历史记录" title="刷新">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 8.2A7 7 0 0 1 18.5 7M17.9 15.8A7 7 0 0 1 5.5 17"/></svg>
+                </button>
+                <button class="button button-danger-ghost detail-clear-button" id="clearButton" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+                  清空全部
+                </button>
+              </div>
+            </div>
+            <div class="detail-body">
+              <div class="detail-placeholder" id="detailPlaceholder">
+                <span class="empty-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M7 3h7l4 4v14H7zM14 3v5h5M10 13h5M10 17h5"/></svg>
+                </span>
+                <strong>选择一条记录查看全文</strong>
+                <p>正文支持选择，也可以一键复制到系统剪贴板。</p>
+              </div>
+              <div class="detail-content" id="detailContent" hidden>
+                <pre id="detailText" tabindex="0"></pre>
+                <div class="detail-actions">
+                  <button class="button button-secondary danger-text" id="deleteButton" type="button">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13"/></svg>
+                    删除此条
+                  </button>
+                  <button class="button button-primary" id="copyButton" type="button">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                    复制全文
+                  </button>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="confirmModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalMessage">
+      <span class="modal-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 2.8 20h18.4L12 3ZM12 9v5M12 17.5v.1"/></svg>
+      </span>
+      <h2 id="modalTitle">确认操作</h2>
+      <p id="modalMessage"></p>
+      <div class="modal-actions">
+        <button class="button button-secondary" id="modalCancel" type="button">取消</button>
+        <button class="button button-danger" id="modalConfirm" type="button">确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+    <span id="toastMessage"></span>
+  </div>
+
+  <div class="boot-screen" id="bootScreen" aria-live="polite">
+    <span class="spinner" aria-hidden="true"></span>
+    <span>正在加载本地设置…</span>
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

@@ -1,252 +1,954 @@
 from __future__ import annotations
 
-import json
-import os
+import atexit
+import ctypes
 import subprocess
+import sys
 import threading
 import time
-import traceback
 import uuid
+import winsound
 from pathlib import Path
-import tkinter as tk
-from tkinter import messagebox
 
 from automation import (
     activate_window,
-    find_codex_window,
+    activate_window_and_wait,
     foreground_window,
+    list_windows,
     paste,
-    select_all_and_copy,
-    start_or_stop_dictation,
+    read_clipboard_text,
+    write_clipboard_text,
 )
+from audio_level import AudioLevelMonitor
+from config_store import (
+    APP_DATA_DIR,
+    CONFIG_PATH,
+    DEFAULT_CONFIG,
+    load_and_persist_config,
+    load_config,
+    update_config,
+)
+from history_store import HistoryStore
+from live_transcript import LiveTranscriptWindow
 from logger import build_loggers
+from overlay import LayeredButtonWindow
+from realtime_asr import RealtimeRecognizer, RealtimeSession, RealtimeUpdate
+from recognition_router import RecognitionError, RecognitionResult, RecognitionRouter
+from standby_listener import StandbyVoiceListener
+from transcript_refinement import refine_transcript
 
 
 APP_NAME = "悬浮语音按钮"
-APP_VERSION = "0.1.0"
-DATA_DIR = Path(os.getenv("LOCALAPPDATA", Path.home())) / "FloatingVoiceButton"
-CONFIG_PATH = DATA_DIR / "config.json"
-DEFAULT_CONFIG = {
-    "codex_window_keywords": ["Codex", "ChatGPT"],
-    "codex_process_names": ["Codex.exe", "ChatGPT.exe"],
-    "transcription_wait_ms": 900,
-    "copy_wait_ms": 250,
-    "paste_wait_ms": 150,
-    "button_size": 64,
-    "position_x": None,
-    "position_y": None,
-}
+APP_VERSION = "0.14.0"
+PANEL_TITLE = "悬浮语音按钮 · 设置与历史记录"
+PROJECT_DIR = Path(__file__).resolve().parent
+ASSET_DIR = PROJECT_DIR / "assets"
+DATA_DIR = APP_DATA_DIR
+ERROR_ALREADY_EXISTS = 183
+_INSTANCE_MUTEX = None
 
 
-def load_config() -> dict:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    config = DEFAULT_CONFIG.copy()
-    if CONFIG_PATH.exists():
-        try:
-            incoming = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-            if isinstance(incoming, dict):
-                config.update(incoming)
-        except (OSError, json.JSONDecodeError):
-            pass
-    # 保留用户自定义项，同时自动兼容 Codex 桌面版的新旧进程名称。
-    config["codex_window_keywords"] = list(
-        dict.fromkeys([*config.get("codex_window_keywords", []), "Codex", "ChatGPT"])
-    )
-    config["codex_process_names"] = list(
-        dict.fromkeys([*config.get("codex_process_names", []), "Codex.exe", "ChatGPT.exe"])
-    )
-    return config
+def acquire_single_instance() -> bool:
+    """确保同一 Windows 会话只存在一个悬浮按钮实例。"""
+    global _INSTANCE_MUTEX
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    handle = kernel32.CreateMutexW(None, False, "Local\\FloatingVoiceButton.Main")
+    if not handle:
+        raise ctypes.WinError()
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        return False
+    _INSTANCE_MUTEX = handle
+    return True
+
+
+def enable_dpi_awareness() -> None:
+    try:
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+    except Exception:
+        pass
 
 
 class VoiceButtonApp:
-    def __init__(self, root: tk.Tk) -> None:
-        self.root = root
-        self.config = load_config()
+    def __init__(self) -> None:
+        self.config = load_and_persist_config()
         self.run_log, self.error_log = build_loggers(DATA_DIR / "logs")
         self.recording = False
         self.busy = False
         self.origin_hwnd = 0
-        self.last_external_hwnd = 0
-        self.codex_hwnd = 0
         self.operation_id = ""
-        self.drag_origin: tuple[int, int, int, int] | None = None
-        self._configure_window()
-        self._build_menu()
-        self._install_exception_handler()
-        self.root.after(100, self._remember_external_window)
-        self.run_log.info("应用启动 | 版本=%s", APP_VERSION)
-
-    def _remember_external_window(self) -> None:
-        """持续记住悬浮按钮之外的前台窗口，避免点击按钮后丢失来源。"""
+        self.standby_operation = False
+        self.standby_end_cue_pending = False
+        self.standby_stop_at_ms: int | None = None
+        self.closed = False
+        self.lock = threading.Lock()
+        self.pipeline_lock = threading.RLock()
+        self.side_effect_lock = threading.RLock()
+        self.stop_event = threading.Event()
+        self.panel_process: subprocess.Popen | None = None
+        self.audio_monitor = AudioLevelMonitor()
+        self.recognition_router = RecognitionRouter(self.config)
+        self.realtime_recognizer = RealtimeRecognizer(
+            rule1_min_trailing_silence=1.2,
+            rule2_min_trailing_silence=0.8,
+        )
+        self.realtime_session: RealtimeSession | None = None
+        self.active_router: RecognitionRouter | None = None
+        self.active_recognition_mode = "batch"
+        self.realtime_revision = 0
+        self.realtime_overload_logged = False
+        self._last_standby_ignored_log = 0.0
+        self._standby_level_stream_ready = False
+        self._standby_error_notified = False
+        self._standby_pipeline_starting = False
         try:
-            hwnd = foreground_window()
-            own_hwnd = int(self.root.winfo_id())
-            if hwnd and hwnd != own_hwnd and not self.recording and not self.busy:
-                self.last_external_hwnd = hwnd
-        finally:
-            self.root.after(150, self._remember_external_window)
-
-    def _configure_window(self) -> None:
-        size = max(48, min(96, int(self.config["button_size"])))
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
+            self.history_store: HistoryStore | None = HistoryStore()
+        except Exception as history_exc:
+            self.history_store = None
+            self.error_log.error(
+                "历史记录初始化失败 | 异常类型=%s", type(history_exc).__name__
+            )
+        size = max(64, min(96, int(self.config["button_size"])))
+        screen_w = ctypes.windll.user32.GetSystemMetrics(0)
+        screen_h = ctypes.windll.user32.GetSystemMetrics(1)
         x = self.config.get("position_x")
         y = self.config.get("position_y")
-        x = screen_w - size - 32 if x is None else int(x)
+        x = screen_w - size - 28 if x is None else int(x)
         y = screen_h // 2 - size // 2 if y is None else int(y)
-        self.root.title(APP_NAME)
-        self.root.geometry(f"{size}x{size}+{x}+{y}")
-        self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", 0.96)
-        self.canvas = tk.Canvas(
-            self.root, width=size, height=size, bg="#111827", highlightthickness=0, cursor="hand2"
-        )
-        self.canvas.pack(fill="both", expand=True)
-        self.circle = self.canvas.create_oval(4, 4, size - 4, size - 4, fill="#2563EB", outline="#93C5FD", width=2)
-        self.icon = self.canvas.create_text(size / 2, size / 2 - 1, text="●", fill="white", font=("Microsoft YaHei UI", 25, "bold"))
-        self.canvas.bind("<ButtonRelease-1>", self._on_release)
-        self.canvas.bind("<ButtonPress-1>", self._on_press)
-        self.canvas.bind("<B1-Motion>", self._on_drag)
-        self.canvas.bind("<Button-3>", self._show_menu)
-
-    def _build_menu(self) -> None:
-        self.menu = tk.Menu(self.root, tearoff=False, font=("Microsoft YaHei UI", 10))
-        self.menu.add_command(label="打开日志目录", command=self._open_logs)
-        self.menu.add_command(label="重新查找 Codex", command=lambda: setattr(self, "codex_hwnd", 0))
-        self.menu.add_separator()
-        self.menu.add_command(label="退出", command=self.close)
-
-    def _install_exception_handler(self) -> None:
-        def report(exc_type, exc_value, exc_tb):
-            self.error_log.error("未处理异常\n%s", "".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
-            messagebox.showerror(APP_NAME, "程序发生错误，详情已写入错误日志。")
-        self.root.report_callback_exception = report
-
-    def _on_press(self, event) -> None:
-        self.drag_origin = (event.x_root, event.y_root, self.root.winfo_x(), self.root.winfo_y())
-
-    def _on_drag(self, event) -> None:
-        if not self.drag_origin:
-            return
-        start_x, start_y, window_x, window_y = self.drag_origin
-        self.root.geometry(f"+{window_x + event.x_root - start_x}+{window_y + event.y_root - start_y}")
-
-    def _on_release(self, event) -> None:
-        if self.drag_origin:
-            moved = abs(event.x_root - self.drag_origin[0]) + abs(event.y_root - self.drag_origin[1])
-            self.drag_origin = None
-            if moved > 8:
-                self._save_position()
-                return
-        self.toggle()
-
-    def _show_menu(self, event) -> None:
-        self.menu.tk_popup(event.x_root, event.y_root)
-
-    def _set_state(self, state: str) -> None:
-        styles = {
-            "idle": ("#2563EB", "●"),
-            "recording": ("#DC2626", "■"),
-            "busy": ("#D97706", "…"),
+        images = {
+            name: ASSET_DIR / f"button_{name}.png"
+            for name in ("idle", "hover", "recording", "busy")
         }
-        color, text = styles[state]
-        self.canvas.itemconfigure(self.circle, fill=color)
-        self.canvas.itemconfigure(self.icon, text=text)
-
-    def toggle(self) -> None:
-        if self.busy:
-            return
-        self.busy = True
-        self.operation_id = uuid.uuid4().hex[:8]
-        self._set_state("busy")
-        action = self._finish if self.recording else self._start
-        threading.Thread(target=action, daemon=True).start()
-
-    def _find_codex(self):
-        window = find_codex_window(
-            list(self.config["codex_window_keywords"]), list(self.config["codex_process_names"])
+        self.window = LayeredButtonWindow(
+            APP_NAME, size, x, y, images,
+            self.toggle,
+            self._save_position,
+            self._open_panel,
+            self._open_logs,
+            self.cleanup,
+            self._window_error,
+            hotkey=str(self.config["global_hotkey"]),
+            button_color=str(self.config["button_color"]),
+            button_opacity=int(self.config["button_opacity"]),
         )
-        if window:
-            self.codex_hwnd = window.hwnd
-        return window
+        self.transcript_window = LiveTranscriptWindow(
+            self.window.hwnd, size, self._window_error
+        )
+        self.standby_listener = StandbyVoiceListener(
+            self.realtime_recognizer,
+            self._on_standby_word,
+            self._on_standby_ready,
+            self._on_standby_update,
+            self._on_standby_ignored,
+            self._on_standby_error,
+        )
+        self._config_stamp = self._read_config_stamp()
+        threading.Thread(target=self._watch_config, name="配置监测", daemon=True).start()
+        self.run_log.info("应用启动 | 版本=%s | 界面=逐像素Alpha分层窗口", APP_VERSION)
+        threading.Thread(target=self._preload_local_model, daemon=True).start()
+        if str(self.config.get("recognition_mode")) == "realtime":
+            threading.Thread(target=self._preload_realtime_model, daemon=True).start()
+        if self.window.hotkey_registered:
+            self.run_log.info("全局快捷键已注册 | 快捷键=%s", self.window.hotkey_label)
+        else:
+            self.error_log.error(
+                "全局快捷键注册失败 | 阶段=应用启动 | 快捷键=%s",
+                self.config["global_hotkey"],
+            )
+            self._warning(
+                f"全局快捷键 {self.config['global_hotkey']} 注册失败，可能已被其他程序占用。"
+            )
+        if bool(self.config.get("standby_enabled")):
+            self._set_standby_enabled(True)
 
-    def _start(self) -> None:
-        started = time.monotonic()
-        op = self.operation_id
+    def _preload_local_model(self) -> None:
+        operation_id = uuid.uuid4().hex[:8]
         try:
-            self.origin_hwnd = self.last_external_hwnd
-            if not self.origin_hwnd:
-                raise RuntimeError("尚未识别原软件，请先切回原软件停留片刻后再点击。")
-            window = self._find_codex()
-            if not window:
-                raise RuntimeError("没有找到 Codex 窗口，请先打开 Codex。")
-            self.run_log.info("操作开始 | 编号=%s | 阶段=开始语音", op)
-            if not activate_window(window.hwnd):
-                raise RuntimeError("无法切换到 Codex 窗口。")
-            time.sleep(0.18)
-            start_or_stop_dictation()
-            self.recording = True
-            elapsed = int((time.monotonic() - started) * 1000)
-            self.run_log.info("操作完成 | 编号=%s | 阶段=开始语音 | 耗时毫秒=%d", op, elapsed)
-            self.root.after(0, lambda: self._set_state("recording"))
+            started = time.monotonic()
+            engine_id, device_label = self.recognition_router.preload()
+            self.run_log.info(
+                "本地模型已就绪 | 编号=%s | 引擎=%s | 设备=%s | 耗时毫秒=%d",
+                operation_id, engine_id, device_label,
+                int((time.monotonic() - started) * 1000),
+            )
         except Exception as exc:
-            self.error_log.exception("操作失败 | 编号=%s | 阶段=开始语音 | 原因=%s", op, exc)
-            self.root.after(0, lambda: messagebox.showwarning(APP_NAME, str(exc)))
-            self.root.after(0, lambda: self._set_state("idle"))
-        finally:
-            self.busy = False
+            self.error_log.error(
+                "本地模型加载失败 | 编号=%s | 阶段=预加载 | 异常类型=%s",
+                operation_id, type(exc).__name__,
+            )
 
-    def _finish(self) -> None:
-        started = time.monotonic()
-        op = self.operation_id
+    def _preload_realtime_model(self) -> None:
+        operation_id = uuid.uuid4().hex[:8]
         try:
-            self.run_log.info("操作开始 | 编号=%s | 阶段=结束并粘贴", op)
-            if not self.codex_hwnd or not activate_window(self.codex_hwnd):
-                window = self._find_codex()
-                if not window or not activate_window(window.hwnd):
-                    raise RuntimeError("无法重新切换到 Codex 窗口。")
-            time.sleep(0.15)
-            start_or_stop_dictation()
-            time.sleep(max(0, int(self.config["transcription_wait_ms"])) / 1000)
-            select_all_and_copy()
-            time.sleep(max(0, int(self.config["copy_wait_ms"])) / 1000)
-            if not activate_window(self.origin_hwnd):
-                raise RuntimeError("无法切回原软件，文字已保留在剪贴板中。")
-            time.sleep(max(0, int(self.config["paste_wait_ms"])) / 1000)
-            paste()
-            elapsed = int((time.monotonic() - started) * 1000)
-            self.run_log.info("操作完成 | 编号=%s | 阶段=结束并粘贴 | 耗时毫秒=%d", op, elapsed)
+            started = time.monotonic()
+            self.realtime_recognizer.load()
+            self.run_log.info(
+                "实时模型已就绪 | 编号=%s | 模型=Zipformer中文实时轻量版 | 设备=CPU | 耗时毫秒=%d",
+                operation_id, int((time.monotonic() - started) * 1000),
+            )
         except Exception as exc:
-            self.error_log.exception("操作失败 | 编号=%s | 阶段=结束并粘贴 | 原因=%s", op, exc)
-            self.root.after(0, lambda: messagebox.showwarning(APP_NAME, str(exc)))
-        finally:
-            self.recording = False
-            self.busy = False
-            self.root.after(0, lambda: self._set_state("idle"))
+            self.error_log.error(
+                "实时模型加载失败 | 编号=%s | 阶段=预加载 | 异常类型=%s",
+                operation_id, type(exc).__name__,
+            )
 
-    def _save_position(self) -> None:
-        self.config["position_x"] = self.root.winfo_x()
-        self.config["position_y"] = self.root.winfo_y()
-        CONFIG_PATH.write_text(json.dumps(self.config, ensure_ascii=False, indent=2), encoding="utf-8")
+    def _on_standby_ready(self, model_name: str = "本地 Zipformer") -> None:
+        self.run_log.info(
+            "待命模式已启动 | 监听模型=%s | 设备=CPU | 控制词=开始/结束",
+            model_name,
+        )
+        if (
+            not self.closed
+            and bool(self.config.get("standby_enabled", False))
+            and not self.busy
+            and not self.recording
+        ):
+            self.window.set_waveform([0.0] * 7)
+            self.window.set_state("standby")
+
+    def _on_standby_level(self, levels: list[float]) -> None:
+        if (
+            bool(self.config.get("standby_enabled", False))
+            and not self.closed
+            and not self.busy
+            and not self.recording
+        ):
+            if not self._standby_level_stream_ready:
+                self._standby_level_stream_ready = True
+                self.run_log.info("待命麦克风电平已接入 | 状态=正在监听")
+            self.window.set_waveform(levels)
+
+    def _on_standby_update(self, update: RealtimeUpdate) -> None:
+        """语音唤起录音时，复用同一个流式会话显示临时文字。"""
+        if self.recording and self.standby_operation:
+            self._on_realtime_update(update)
+
+    def _on_standby_ignored(self, character_count: int = 0) -> None:
+        now = time.monotonic()
+        if now - self._last_standby_ignored_log < 15.0:
+            return
+        self._last_standby_ignored_log = now
+        self.run_log.info(
+            "待命语音未命中控制词 | 阶段=本地控制词监听 | 字符数=%d",
+            max(0, int(character_count)),
+        )
+
+    def _on_standby_error(self, message: str) -> None:
+        operation_id = uuid.uuid4().hex[:8]
+        self.error_log.error(
+            "待命模式异常 | 编号=%s | 阶段=本地Zipformer控制词监听 | 原因=%s",
+            operation_id, str(message).replace("\r", " ").replace("\n", " ")[:300],
+        )
+        if self.closed:
+            return
+        if self._standby_pipeline_starting or (self.busy and not self.recording):
+            return
+        if self.recording and self.standby_operation:
+            if not self._standby_error_notified:
+                self._standby_error_notified = True
+                self._warning(
+                    "结束语音监听暂时不可用，录音仍在继续。\n"
+                    "请点击悬浮按钮或使用全局快捷键停止录音。"
+                )
+            return
+        if not self.busy:
+            if self.standby_listener.state != "failed":
+                self.standby_listener.stop()
+            self.audio_monitor.close()
+            self.window.set_state("idle")
+        self._warning("待命模式已停止，请检查麦克风、本地实时模型和错误日志。")
+
+    def _start_standby_pipeline(self) -> bool:
+        """启动单一麦克风输入和本地控制词解码，不保存待命音频。"""
+        with self.pipeline_lock:
+            if self.closed:
+                self.standby_listener.stop()
+                self.audio_monitor.close()
+                return False
+            if (
+                self.standby_listener.state == "waiting"
+                and self.standby_listener.running
+                and self.audio_monitor.is_open
+                and bool(self.audio_monitor.continuous)
+            ):
+                self.audio_monitor.set_waiting_level_callback(self._on_standby_level)
+                self.window.set_state("standby")
+                return True
+            self._standby_level_stream_ready = False
+            self._standby_error_notified = False
+            self._standby_pipeline_starting = True
+            try:
+                if not self.standby_listener.resume_waiting():
+                    raise RuntimeError("本地待命模型没有成功启动。")
+                if not self.audio_monitor.is_open:
+                    self.audio_monitor.open_continuous(
+                        self._on_standby_level,
+                        self.standby_listener.feed_pcm16,
+                    )
+                else:
+                    self.audio_monitor.set_waiting_level_callback(self._on_standby_level)
+                if self.closed:
+                    self.standby_listener.stop()
+                    self.audio_monitor.close()
+                    return False
+                self.window.set_waveform([0.0] * 7)
+                self.window.set_state("standby")
+                return True
+            except Exception as exc:
+                self.standby_listener.stop()
+                self.audio_monitor.close()
+                self.error_log.error(
+                    "待命模式启动失败 | 阶段=本地Zipformer控制词监听 | 异常类型=%s",
+                    type(exc).__name__,
+                )
+                if not self.closed:
+                    self.window.set_state("idle")
+                return False
+            finally:
+                self._standby_pipeline_starting = False
+
+    def _restore_resting_pipeline(self) -> None:
+        """根据最新设置恢复待命监听；处理中修改的设置在此生效。"""
+        with self.pipeline_lock:
+            if self.closed:
+                self.standby_listener.stop()
+                self.audio_monitor.close()
+                return
+            if bool(self.config.get("standby_enabled", False)):
+                if not self._start_standby_pipeline() and not self.closed:
+                    self._warning("待命模式启动失败，请检查麦克风、本地实时模型和错误日志。")
+            else:
+                self.standby_listener.stop()
+                self.audio_monitor.close()
+                self.window.set_state("idle")
+
+    def _set_standby_enabled(self, enabled: bool) -> None:
+        with self.pipeline_lock:
+            if self.closed:
+                self.standby_listener.stop()
+                self.audio_monitor.close()
+                return
+            if self.busy or self.recording:
+                self.run_log.info(
+                    "待命设置将在当前操作结束后生效 | 状态=%s",
+                    "开启" if enabled else "关闭",
+                )
+                return
+            if enabled:
+                if self._start_standby_pipeline():
+                    self.run_log.info("待命模式正在启动 | 控制词=开始/结束")
+                else:
+                    self._warning("待命模式启动失败，请检查麦克风、本地实时模型和错误日志。")
+            else:
+                self.standby_listener.stop()
+                self.audio_monitor.close()
+                self.window.set_state("idle")
+                self.run_log.info("待命模式已停止")
+
+    def _resting_button_state(self) -> str:
+        listener = getattr(self, "standby_listener", None)
+        config = getattr(self, "config", {})
+        if bool(config.get("standby_enabled", False)) and bool(
+            listener is not None and listener.running
+        ):
+            return "standby"
+        return "idle"
+
+    def _on_standby_word(self, word: str, segment_start_ms: int = 0) -> None:
+        normalized = str(word).strip()
+        if normalized in ("开始", "開始"):
+            with self.lock:
+                should_start = (
+                    not self.closed
+                    and bool(self.config.get("standby_enabled", False))
+                    and not self.busy
+                    and not self.recording
+                )
+                if should_start:
+                    self.busy = True
+                    self.operation_id = uuid.uuid4().hex[:8]
+                    self.standby_operation = True
+                    self.standby_stop_at_ms = None
+            if should_start:
+                try:
+                    self.run_log.info("待命控制词已识别 | 阶段=开始 | 引擎=本地Zipformer")
+                    self._play_standby_cue("开始")
+                    with self.lock:
+                        cancelled = self.closed or not bool(
+                            self.config.get("standby_enabled", False)
+                        )
+                        if cancelled:
+                            self.busy = False
+                            self.standby_operation = False
+                    if cancelled:
+                        if not self.closed:
+                            with self.pipeline_lock:
+                                self.audio_monitor.close()
+                                self.window.set_state("idle")
+                        return
+                    self.window.set_state("busy")
+                    threading.Thread(target=self._start, daemon=True).start()
+                except Exception:
+                    with self.lock:
+                        self.busy = False
+                        self.standby_operation = False
+                    raise
+        elif normalized in ("结束", "結束"):
+            with self.lock:
+                should_finish = (
+                    not self.closed
+                    and not self.busy
+                    and self.recording
+                    and self.standby_operation
+                )
+                if should_finish:
+                    self.busy = True
+                    self.standby_end_cue_pending = True
+                    self.standby_stop_at_ms = max(0, int(segment_start_ms))
+            if should_finish:
+                try:
+                    self.run_log.info(
+                        "待命控制词已识别 | 阶段=结束 | 引擎=本地Zipformer | 正文截止毫秒=%d",
+                        self.standby_stop_at_ms,
+                    )
+                    self.window.set_state("busy")
+                    threading.Thread(target=self._finish, daemon=True).start()
+                except Exception:
+                    with self.lock:
+                        self.busy = False
+                        self.standby_end_cue_pending = False
+                    raise
+
+    def _play_standby_cue(self, stage: str) -> None:
+        """播放控制词确认音；提示音失败不能阻断录音流程。"""
+        frequency, duration = (880, 110) if stage == "开始" else (660, 90)
+        try:
+            winsound.Beep(frequency, duration)
+            self.run_log.info("待命提示音已播放 | 阶段=%s", stage)
+        except (OSError, RuntimeError) as exc:
+            self.error_log.warning(
+                "待命提示音播放失败 | 阶段=%s | 异常类型=%s",
+                stage, type(exc).__name__,
+            )
+
+    def _window_error(self, exc: Exception) -> None:
+        self.error_log.error("窗口异常 | 阶段=分层窗口 | 异常类型=%s", type(exc).__name__)
+
+    def _save_position(self, x: int, y: int) -> None:
+        self.config = update_config({"position_x": x, "position_y": y})
+        self.run_log.info("窗口移动 | 位置=(%d,%d)", x, y)
+        self.transcript_window.follow_anchor()
+
+    @staticmethod
+    def _read_config_stamp() -> int:
+        try:
+            return CONFIG_PATH.stat().st_mtime_ns
+        except OSError:
+            return 0
+
+    def _watch_config(self) -> None:
+        while not self.stop_event.wait(0.4):
+            stamp = self._read_config_stamp()
+            if not stamp or stamp == self._config_stamp:
+                continue
+            self._config_stamp = stamp
+            try:
+                updated = load_config()
+                if self.closed:
+                    return
+                previous = self.config
+                old_appearance = (
+                    previous.get("button_color"), previous.get("button_opacity")
+                )
+                self.config = updated
+                new_appearance = (
+                    updated.get("button_color"), updated.get("button_opacity")
+                )
+                if new_appearance != old_appearance:
+                    self.window.set_appearance(str(new_appearance[0]), int(new_appearance[1]))
+                    self.run_log.info(
+                        "外观设置已应用 | 颜色=%s | 透明度=%d%%",
+                        new_appearance[0], new_appearance[1],
+                    )
+                old_hotkey = str(previous.get("global_hotkey", DEFAULT_CONFIG["global_hotkey"]))
+                new_hotkey = str(updated.get("global_hotkey", DEFAULT_CONFIG["global_hotkey"]))
+                if new_hotkey != old_hotkey:
+                    operation_id = uuid.uuid4().hex[:8]
+                    registered, reason = self.window.set_hotkey(new_hotkey)
+                    if registered:
+                        self.run_log.info(
+                            "设置应用完成 | 编号=%s | 阶段=更新全局快捷键 | 快捷键=%s",
+                            operation_id, self.window.hotkey_label,
+                        )
+                    else:
+                        self.error_log.error(
+                            "设置应用失败 | 编号=%s | 阶段=更新全局快捷键 | 快捷键=%s | 原因=%s",
+                            operation_id, new_hotkey, reason,
+                        )
+                        self.config = update_config({"global_hotkey": old_hotkey})
+                        self._config_stamp = self._read_config_stamp()
+                        self._warning(f"{reason}\n已继续使用原快捷键 {old_hotkey}。")
+                old_standby = bool(previous.get("standby_enabled", False))
+                new_standby = bool(updated.get("standby_enabled", False))
+                if new_standby != old_standby:
+                    self._set_standby_enabled(new_standby)
+                old_recognition = (
+                    previous.get("recognition_engine"),
+                    previous.get("fallback_model"),
+                    previous.get("local_asr_device"),
+                    previous.get("recognition_mode"),
+                )
+                new_recognition = (
+                    updated.get("recognition_engine"),
+                    updated.get("fallback_model"),
+                    updated.get("local_asr_device"),
+                    updated.get("recognition_mode"),
+                )
+                if new_recognition != old_recognition:
+                    self.recognition_router = RecognitionRouter(updated)
+                    threading.Thread(target=self._preload_local_model, daemon=True).start()
+                    if str(updated.get("recognition_mode")) == "realtime":
+                        threading.Thread(
+                            target=self._preload_realtime_model, daemon=True
+                        ).start()
+            except Exception as exc:
+                self.error_log.error(
+                    "配置重新加载失败 | 异常类型=%s", type(exc).__name__
+                )
+
+    def _open_panel(self) -> None:
+        for window in list_windows():
+            if window.title == PANEL_TITLE:
+                activate_window(window.hwnd)
+                return
+        if self.panel_process is not None and self.panel_process.poll() is None:
+            return
+        try:
+            self.panel_process = subprocess.Popen(
+                [sys.executable, str(PROJECT_DIR / "settings_panel.py")],
+                cwd=str(PROJECT_DIR),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            self.run_log.info("设置窗口已打开")
+            threading.Thread(
+                target=self._check_panel_startup,
+                args=(self.panel_process,),
+                name="设置窗口启动检查",
+                daemon=True,
+            ).start()
+        except Exception as exc:
+            self.error_log.error(
+                "设置窗口打开失败 | 异常类型=%s", type(exc).__name__
+            )
+            self._warning("无法打开设置与历史记录窗口，请查看错误日志。")
+
+    def _check_panel_startup(self, process: subprocess.Popen) -> None:
+        """捕获另一台电脑缺少网页组件等导致的静默启动失败。"""
+        try:
+            return_code = process.wait(timeout=2.5)
+        except subprocess.TimeoutExpired:
+            return
+        if self.closed or process is not self.panel_process:
+            return
+        operation_id = uuid.uuid4().hex[:8]
+        self.error_log.error(
+            "设置窗口启动失败 | 编号=%s | 阶段=子进程启动 | 退出代码=%d",
+            operation_id, return_code,
+        )
+        self._warning(
+            "设置与历史记录窗口没有成功启动。\n"
+            "请安装 Microsoft Edge WebView2 Runtime，并在程序目录运行：\n"
+            "python -m pip install -r requirements.txt\n\n"
+            "详细原因已写入“面板-错误.log”。"
+        )
 
     def _open_logs(self) -> None:
         log_dir = DATA_DIR / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         subprocess.Popen(["explorer.exe", str(log_dir)])
 
-    def close(self) -> None:
-        self._save_position()
+    def _warning(self, message: str) -> None:
+        ctypes.windll.user32.MessageBoxW(None, message, APP_NAME, 0x30)
+
+    def toggle(self) -> None:
+        with self.lock:
+            if self.closed or self.busy:
+                return
+            self.busy = True
+            if self.recording:
+                action = self._finish
+            else:
+                self.operation_id = uuid.uuid4().hex[:8]
+                if not self.standby_operation:
+                    self.standby_operation = False
+                action = self._start
+        self.window.set_state("busy")
+        threading.Thread(target=action, daemon=True).start()
+
+    def _start(self) -> None:
+        started = time.monotonic()
+        op = self.operation_id
+        voice_started = bool(self.standby_operation)
+        with self.lock:
+            if self.closed:
+                self.busy = False
+                return
+        try:
+            self.origin_hwnd = foreground_window()
+            if (
+                not voice_started
+                and (not self.origin_hwnd or self.origin_hwnd == self.window.hwnd)
+            ):
+                raise RuntimeError("尚未识别原软件，请先切回原软件停留片刻。")
+            self.active_router = getattr(self, "recognition_router", None)
+            self.active_recognition_mode = str(
+                self.config.get("recognition_mode", "batch")
+            )
+            self.realtime_session = None
+            self.realtime_revision = 0
+            self.realtime_overload_logged = False
+            pcm_callback = None
+            if self.active_recognition_mode == "realtime":
+                self.transcript_window.show("正在聆听…")
+            with self.pipeline_lock:
+                if self.closed:
+                    return
+                if voice_started:
+                    if not self.audio_monitor.is_open:
+                        raise RuntimeError("待命麦克风已经断开，请重新开启待命模式。")
+                    if not self.standby_listener.prepare_recording(op):
+                        raise RuntimeError("结束语音监听没有成功启动，请重新尝试。")
+                else:
+                    if not self.standby_listener.pause():
+                        raise RuntimeError("旧的实时识别会话没有安全退出，请重新尝试。")
+                    if self.active_recognition_mode == "realtime":
+                        try:
+                            self.realtime_session = self.realtime_recognizer.create_session(
+                                op, self._on_realtime_update
+                            )
+                            pcm_callback = self._feed_realtime_audio
+                        except Exception as realtime_exc:
+                            self.error_log.error(
+                                "实时预览启动失败 | 编号=%s | 阶段=开始录音 | 异常类型=%s",
+                                op, type(realtime_exc).__name__,
+                            )
+                            self.transcript_window.update("实时文字暂时不可用，仍会在停止后识别。")
+                if self.audio_monitor.is_open:
+                    self.audio_monitor.begin_capture(
+                        self.window.set_waveform,
+                        pcm_callback,
+                        self.standby_listener.activate_recording if voice_started else None,
+                    )
+                elif pcm_callback is None:
+                    self.audio_monitor.start(self.window.set_waveform)
+                else:
+                    self.audio_monitor.start(self.window.set_waveform, pcm_callback)
+            self.run_log.info(
+                "操作开始 | 编号=%s | 阶段=本地录音 | 文字模式=%s",
+                op, "实时识别" if self.active_recognition_mode == "realtime" else "整段识别",
+            )
+            with self.lock:
+                if self.closed:
+                    return
+                self.recording = True
+                self.window.set_state("recording")
+            self.run_log.info("操作进度 | 编号=%s | 阶段=麦克风录音已启动", op)
+            elapsed = int((time.monotonic() - started) * 1000)
+            self.run_log.info("操作完成 | 编号=%s | 阶段=开始语音 | 耗时毫秒=%d", op, elapsed)
+        except Exception as exc:
+            with self.pipeline_lock:
+                if bool(getattr(self.audio_monitor, "continuous", False)):
+                    self.audio_monitor.finish_capture()
+                else:
+                    self.audio_monitor.stop()
+                if getattr(self, "realtime_session", None) is not None:
+                    self.realtime_session.cancel()
+                    self.realtime_session = None
+            self.standby_listener.pause()
+            transcript_window = getattr(self, "transcript_window", None)
+            if transcript_window is not None and not self.closed:
+                transcript_window.hide()
+            self.standby_operation = False
+            self.standby_stop_at_ms = None
+            if not self.closed:
+                self.error_log.error(
+                    "操作失败 | 编号=%s | 阶段=开始语音 | 异常类型=%s",
+                    op, type(exc).__name__,
+                )
+                self._warning(str(exc))
+        finally:
+            self.busy = False
+            if not self.recording:
+                self._restore_resting_pipeline()
+
+    def _feed_realtime_audio(self, pcm: bytes, sample_rate: int) -> bool:
+        session = self.realtime_session
+        if session is None:
+            return False
+        accepted = session.feed_pcm16(pcm, sample_rate)
+        if not accepted and session.overloaded and not self.realtime_overload_logged:
+            self.realtime_overload_logged = True
+            self.error_log.warning(
+                "实时预览已降级 | 编号=%s | 阶段=音频队列积压 | 最终整段识别继续",
+                self.operation_id,
+            )
+            self.transcript_window.update("实时预览速度不足，停止后仍会完成识别。")
+        return accepted
+
+    def _on_realtime_update(self, update: RealtimeUpdate) -> None:
+        if update.operation_id != self.operation_id or update.revision <= self.realtime_revision:
+            return
+        self.realtime_revision = update.revision
+        if self.active_recognition_mode == "realtime" and not update.is_final:
+            self.transcript_window.update(update.text or "正在聆听…")
+
+    def _finish(self) -> None:
+        started = time.monotonic()
+        op = self.operation_id
+        with self.lock:
+            if self.closed:
+                self.busy = False
+                return
+        try:
+            with self.pipeline_lock:
+                if self.closed:
+                    return
+                if bool(getattr(self.audio_monitor, "continuous", False)):
+                    pcm, sample_rate = self.audio_monitor.finish_capture()
+                else:
+                    pcm, sample_rate = self.audio_monitor.stop()
+                if self.standby_operation:
+                    self.standby_listener.pause()
+            if self.standby_operation:
+                stop_at_ms = self.standby_stop_at_ms
+                if stop_at_ms is not None:
+                    original_bytes = len(pcm)
+                    stop_byte = max(0, int(stop_at_ms * sample_rate / 1000) * 2)
+                    pcm = pcm[: min(original_bytes, stop_byte)]
+                    self.run_log.info(
+                        "操作进度 | 编号=%s | 阶段=裁去结束控制词 | 正文毫秒=%d | 裁去字节=%d",
+                        op, stop_at_ms, max(0, original_bytes - len(pcm)),
+                    )
+            if getattr(self, "standby_end_cue_pending", False):
+                self.standby_end_cue_pending = False
+                self._play_standby_cue("结束")
+            if self.closed:
+                return
+            self.window.set_state("busy")
+            if getattr(self, "active_recognition_mode", "batch") == "realtime":
+                self.transcript_window.update("正在整理文字…")
+            session = getattr(self, "realtime_session", None)
+            self.realtime_session = None
+            if session is not None:
+                try:
+                    live_result = session.finish(timeout=5.0)
+                    self.run_log.info(
+                        "操作进度 | 编号=%s | 阶段=实时预览结束 | 字符数=%d | 音频毫秒=%d",
+                        op, len(live_result.text), live_result.audio_ms,
+                    )
+                except Exception as realtime_exc:
+                    self.error_log.warning(
+                        "实时预览结束异常 | 编号=%s | 阶段=停止录音 | 异常类型=%s | 最终整段识别继续",
+                        op, type(realtime_exc).__name__,
+                    )
+            if self.closed or self.stop_event.is_set():
+                return
+            router = getattr(self, "active_router", None) or getattr(
+                self, "recognition_router", None
+            )
+            requested_engine = getattr(router, "engine_id", "local:legacy")
+            self.run_log.info(
+                "操作开始 | 编号=%s | 阶段=语音识别 | 请求引擎=%s | 音频毫秒=%d",
+                op, requested_engine,
+                int(len(pcm) / 2 / max(1, sample_rate) * 1000),
+            )
+            if len(pcm) < sample_rate // 2:
+                raise RuntimeError("录音时间太短，请重新录制。")
+            result = self._recognize_pcm(pcm, sample_rate)
+            if self.closed or self.stop_event.is_set():
+                return
+            text = result.text
+            if result.fallback_used:
+                self.run_log.info(
+                    "操作进度 | 编号=%s | 阶段=在线识别瞬时失败并已回退 | 请求引擎=%s | 实际引擎=%s",
+                    op, result.requested_engine, result.actual_engine,
+                )
+            else:
+                self.run_log.info(
+                    "操作进度 | 编号=%s | 阶段=语音识别完成 | 实际引擎=%s",
+                    op, result.actual_engine,
+                )
+            if not text:
+                raise RuntimeError("没有识别到有效语音，请重新录制。")
+            refined_text = refine_transcript(text)
+            if refined_text != text:
+                self.run_log.info(
+                    "操作进度 | 编号=%s | 阶段=最终文字轻量修正 | 修正前字符数=%d | 修正后字符数=%d",
+                    op, len(text), len(refined_text),
+                )
+            text = refined_text
+            if not text:
+                raise RuntimeError("没有识别到有效语音，请重新录制。")
+            if self.history_store is not None:
+                with self.side_effect_lock:
+                    if self.closed or self.stop_event.is_set():
+                        return
+                    try:
+                        self.history_store.add(op, text)
+                        self.run_log.info(
+                            "操作进度 | 编号=%s | 阶段=历史记录已保存 | 字符数=%d",
+                            op, len(text),
+                        )
+                    except Exception as history_exc:
+                        self.error_log.error(
+                            "历史记录保存失败 | 编号=%s | 异常类型=%s",
+                            op, type(history_exc).__name__,
+                        )
+            if self.standby_operation:
+                elapsed = int((time.monotonic() - started) * 1000)
+                self.run_log.info(
+                    "操作完成 | 编号=%s | 阶段=待命识别并保存历史 | 字符数=%d | 耗时毫秒=%d",
+                    op, len(text), elapsed,
+                )
+                return
+            if self.closed or self.stop_event.is_set():
+                return
+            with self.side_effect_lock:
+                if self.closed or self.stop_event.is_set():
+                    return
+                activated = activate_window_and_wait(self.origin_hwnd)
+                if self.closed or self.stop_event.is_set():
+                    return
+                if not activated:
+                    raise RuntimeError("无法切回原软件，文字已保留在剪贴板中。")
+            time.sleep(max(0, int(self.config["paste_wait_ms"])) / 1000)
+            with self.side_effect_lock:
+                if self.closed or self.stop_event.is_set():
+                    return
+                activated = activate_window_and_wait(self.origin_hwnd)
+                if self.closed or self.stop_event.is_set():
+                    return
+                if not activated:
+                    raise RuntimeError("粘贴前原软件失去焦点，文字已保留在剪贴板中。")
+                self._ensure_clipboard_text(text, op, "粘贴前")
+                if self.closed or self.stop_event.is_set():
+                    return
+                if foreground_window() != self.origin_hwnd:
+                    raise RuntimeError("粘贴前原软件失去焦点，文字已保留在剪贴板中。")
+                if self.closed or self.stop_event.is_set():
+                    return
+                paste()
+            elapsed = int((time.monotonic() - started) * 1000)
+            self.run_log.info("操作完成 | 编号=%s | 阶段=结束并粘贴 | 耗时毫秒=%d", op, elapsed)
+        except Exception as exc:
+            if self.closed:
+                return
+            if isinstance(exc, RecognitionError):
+                self.error_log.error(
+                    "操作失败 | 编号=%s | 阶段=结束并粘贴 | 异常类型=%s | 类别=%s | 引擎=%s",
+                    op, type(exc).__name__, exc.category, exc.engine_id,
+                )
+                message = exc.public_message
+            else:
+                self.error_log.error(
+                    "操作失败 | 编号=%s | 阶段=结束并粘贴 | 异常类型=%s",
+                    op, type(exc).__name__,
+                )
+                message = str(exc)
+            self._warning(message)
+        finally:
+            with self.pipeline_lock:
+                if bool(getattr(self.audio_monitor, "continuous", False)):
+                    self.audio_monitor.finish_capture()
+                else:
+                    self.audio_monitor.stop()
+                if getattr(self, "realtime_session", None) is not None:
+                    self.realtime_session.cancel()
+                    self.realtime_session = None
+                self.standby_listener.pause()
+            transcript_window = getattr(self, "transcript_window", None)
+            if transcript_window is not None and not self.closed:
+                transcript_window.hide()
+            with self.lock:
+                self.active_router = None
+                self.recording = False
+                self.standby_operation = False
+                self.standby_end_cue_pending = False
+                self.standby_stop_at_ms = None
+                self.busy = False
+            if not self.closed:
+                self.window.set_waveform([0.0] * 7)
+            self._restore_resting_pipeline()
+
+    def _recognize_pcm(self, pcm: bytes, sample_rate: int) -> RecognitionResult:
+        """统一识别入口；保留旧测试夹具和升级中的旧实例兼容。"""
+        router = getattr(self, "active_router", None) or getattr(
+            self, "recognition_router", None
+        )
+        if router is not None:
+            return router.transcribe_pcm16(pcm, sample_rate)
+        recognizer = self.local_recognizer
+        text = recognizer.transcribe_pcm16(pcm, sample_rate)
+        return RecognitionResult(
+            text=str(text or "").strip(),
+            requested_engine="local:legacy",
+            actual_engine="local:legacy",
+            device_label=str(getattr(recognizer, "device_label", "本地")),
+        )
+
+    def _ensure_clipboard_text(self, text: str, op: str, stage: str) -> None:
+        if read_clipboard_text() == text:
+            return
+        if not write_clipboard_text(text, self.window.hwnd):
+            raise RuntimeError("系统剪贴板内容发生变化，且无法恢复识别文字。")
+        self.run_log.info(
+            "操作进度 | 编号=%s | 阶段=%s恢复系统剪贴板 | 字符数=%d",
+            op, stage, len(text),
+        )
+
+    def cleanup(self) -> None:
+        with self.lock:
+            if self.closed:
+                return
+            self.closed = True
+            self.busy = True
+        self.stop_event.set()
+        # 等待已经开始的短暂历史/窗口/剪贴板副作用结束；此后 closed
+        # 会阻止任何新的副作用进入。
+        with self.side_effect_lock:
+            pass
+        with self.pipeline_lock:
+            self.audio_monitor.close()
+            if self.realtime_session is not None:
+                self.realtime_session.cancel()
+                self.realtime_session = None
+            self.standby_listener.stop()
+        self.transcript_window.close()
         self.run_log.info("应用退出 | 版本=%s", APP_VERSION)
-        self.root.destroy()
+
+    def run(self) -> None:
+        self.window.run()
 
 
 def main() -> None:
-    root = tk.Tk()
-    app = VoiceButtonApp(root)
-    root.protocol("WM_DELETE_WINDOW", app.close)
-    root.mainloop()
+    enable_dpi_awareness()
+    if not acquire_single_instance():
+        ctypes.windll.user32.MessageBoxW(
+            None, "悬浮语音按钮已经在运行。", APP_NAME, 0x40
+        )
+        return
+    app = VoiceButtonApp()
+    atexit.register(app.cleanup)
+    app.run()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        log_dir = DATA_DIR / "logs"
+        _, error_log = build_loggers(log_dir)
+        error_log.error("启动失败 | 异常类型=%s", type(exc).__name__)
+        raise

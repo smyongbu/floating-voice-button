@@ -27,6 +27,22 @@ class LoggerTests(unittest.TestCase):
                     handler.close()
                     logger.removeHandler(handler)
 
+    def test_panel_logs_use_independent_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            run, error = build_loggers(Path(temp), "面板")
+            run.info("面板启动")
+            error.warning("面板测试错误")
+            for logger in (run, error):
+                for handler in logger.handlers:
+                    handler.flush()
+            self.assertTrue((Path(temp) / "面板-运行.log").exists())
+            self.assertTrue((Path(temp) / "面板-错误.log").exists())
+            self.assertFalse((Path(temp) / "运行.log").exists())
+            for logger in (run, error):
+                for handler in list(logger.handlers):
+                    handler.close()
+                    logger.removeHandler(handler)
+
 
 if __name__ == "__main__":
     unittest.main()

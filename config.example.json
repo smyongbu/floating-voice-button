@@ -1,10 +1,15 @@
 {
-  "codex_window_keywords": ["Codex", "ChatGPT"],
-  "codex_process_names": ["Codex.exe", "ChatGPT.exe"],
-  "transcription_wait_ms": 900,
-  "copy_wait_ms": 250,
+  "config_version": 6,
   "paste_wait_ms": 150,
-  "button_size": 64,
+  "button_size": 72,
+  "button_color": "#2563EB",
+  "button_opacity": 100,
+  "global_hotkey": "Ctrl+Alt+Space",
+  "standby_enabled": false,
+  "recognition_mode": "realtime",
+  "recognition_engine": "local:sensevoice-small-int8",
+  "fallback_model": "sensevoice-small-int8",
+  "local_asr_device": "auto",
   "position_x": null,
   "position_y": null
 }

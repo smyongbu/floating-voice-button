@@ -1,2 +1,6 @@
-# 本项目仅使用 Python 标准库，无第三方运行依赖。
-
+Pillow>=10,<13
+sounddevice>=0.5,<1
+pywebview==6.2.1
+sherpa-onnx>=1.13,<1.14
+websocket-client>=1.8,<2
+faster-whisper>=1.2,<2

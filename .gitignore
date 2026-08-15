@@ -4,4 +4,4 @@ __pycache__/
 .venv/
 logs/
 config.json
-
+models/
