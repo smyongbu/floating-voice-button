@@ -40,4 +40,4 @@
 
 JDK 17、Android SDK 35、Android Build Tools 35、Gradle 8.9。执行 `gradle assembleDebug` 后，安装包位于 `app/build/outputs/apk/debug/app-debug.apk`。
 
-当前应用版本为 `0.7.0`。实时模型使用中英双语 Zipformer，讲话过程中即可识别中文、英文和中英混说；界面不会显示 `<nuk>` 等模型内部标记。
+当前应用版本为 `0.7.1`。实时模型使用中英双语 Zipformer，讲话过程中即可识别中文、英文和中英混说；界面不会显示 `<nuk>` 等模型内部标记。底部导航的图标与文字使用统一的上下排列，顶层页面切换时底栏保持稳定，只对新的选中项执行轻量状态动画。

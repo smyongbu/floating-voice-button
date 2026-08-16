@@ -8,52 +8,58 @@
     android:paddingHorizontal="8dp"
     android:paddingVertical="8dp">
 
-    <Button
+    <TextView
         android:id="@+id/navRecording"
         android:layout_width="0dp"
         android:layout_height="56dp"
         android:layout_weight="1"
         android:background="@drawable/nav_item_unselected"
-        android:drawableStart="@drawable/ic_nav_microphone"
-        android:drawablePadding="6dp"
+        android:drawableTop="@drawable/ic_nav_microphone"
+        android:clickable="true"
+        android:drawablePadding="3dp"
+        android:focusable="true"
         android:gravity="center"
         android:minHeight="56dp"
+        android:padding="0dp"
         android:text="录音"
-        android:textAllCaps="false"
         android:textColor="@color/nav_unselected"
         android:textSize="14sp" />
 
     <Space android:layout_width="6dp" android:layout_height="1dp" />
 
-    <Button
+    <TextView
         android:id="@+id/navHistory"
         android:layout_width="0dp"
         android:layout_height="56dp"
         android:layout_weight="1"
         android:background="@drawable/nav_item_unselected"
-        android:drawableStart="@drawable/ic_nav_history"
-        android:drawablePadding="6dp"
+        android:drawableTop="@drawable/ic_nav_history"
+        android:clickable="true"
+        android:drawablePadding="3dp"
+        android:focusable="true"
         android:gravity="center"
         android:minHeight="56dp"
+        android:padding="0dp"
         android:text="记录"
-        android:textAllCaps="false"
         android:textColor="@color/nav_unselected"
         android:textSize="14sp" />
 
     <Space android:layout_width="6dp" android:layout_height="1dp" />
 
-    <Button
+    <TextView
         android:id="@+id/navSettings"
         android:layout_width="0dp"
         android:layout_height="56dp"
         android:layout_weight="1"
         android:background="@drawable/nav_item_unselected"
-        android:drawableStart="@drawable/ic_nav_settings"
-        android:drawablePadding="6dp"
+        android:drawableTop="@drawable/ic_nav_settings"
+        android:clickable="true"
+        android:drawablePadding="3dp"
+        android:focusable="true"
         android:gravity="center"
         android:minHeight="56dp"
+        android:padding="0dp"
         android:text="设置"
-        android:textAllCaps="false"
         android:textColor="@color/nav_unselected"
         android:textSize="14sp" />
 </LinearLayout>
