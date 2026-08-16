@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settingsRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F5F7FB"
+    android:orientation="vertical">
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="设置" android:textColor="#0F172A" android:textSize="28sp" android:textStyle="bold" />
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:background="@drawable/panel_background" android:orientation="vertical">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="识别方案" android:textColor="#0F172A" android:textSize="18sp" android:textStyle="bold" />
+                <RadioGroup android:id="@+id/engineGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+                    <RadioButton android:id="@+id/dualOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="92dp" android:paddingVertical="10dp" android:text="实时识别＋整体校正（推荐）&#10;中英文：支持中文、英文及中英混说&#10;性能：最低 4 核、6 GB 内存；推荐 8 GB；估算占用 500～800 MB" android:textColor="#0F172A" android:textSize="14sp" />
+                    <RadioButton android:id="@+id/zipformerOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="92dp" android:paddingVertical="10dp" android:text="仅 Zipformer 实时识别&#10;中英文：支持中文、英文及中英混说&#10;性能：模型约 60 MB；最低 4 核、4 GB 内存；估算占用 200～350 MB" android:textColor="#0F172A" android:textSize="14sp" />
+                    <RadioButton android:id="@+id/paraformerOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="92dp" android:paddingVertical="10dp" android:text="仅 Paraformer 整段识别&#10;中英文：支持中文、英文及中英混说&#10;性能：模型约 82 MB；最低 4 核、4 GB 内存；估算占用 250～450 MB" android:textColor="#0F172A" android:textSize="14sp" />
+                    <RadioButton android:id="@+id/systemOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:paddingVertical="10dp" android:text="手机系统默认识别&#10;中英文与性能取决于手机当前语音服务，可能需要网络" android:textColor="#0F172A" android:textSize="14sp" />
+                </RadioGroup>
+                <TextView android:id="@+id/performanceText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:background="#F8FAFC" android:lineSpacingExtra="3dp" android:padding="12dp" android:text="正在读取本机配置…" android:textColor="#334155" android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:layout_marginBottom="8dp" android:background="@drawable/panel_background" android:orientation="vertical">
+                <Switch android:id="@+id/overlaySwitch" android:layout_width="match_parent" android:layout_height="56dp" android:gravity="center_vertical" android:minHeight="56dp" android:text="开启悬浮小球" android:textColor="#0F172A" android:textSize="17sp" android:textStyle="bold" />
+                <TextView android:id="@+id/overlayStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="开启后可在其他应用上方开始识别。" android:textColor="#475569" android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <include layout="@layout/bottom_navigation" />
+</LinearLayout>

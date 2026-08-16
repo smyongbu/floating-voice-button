@@ -32,5 +32,6 @@
             </intent-filter>
         </activity>
         <activity android:name=".HistoryActivity" android:exported="false" android:launchMode="singleTop" />
+        <activity android:name=".SettingsActivity" android:exported="false" android:launchMode="singleTop" />
     </application>
 </manifest>

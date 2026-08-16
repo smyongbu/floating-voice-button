@@ -13,6 +13,10 @@ class WaveformView @JvmOverloads constructor(context: Context, attrs: AttributeS
         for (i in 0 until levels.lastIndex) levels[i] = levels[i + 1]
         levels[levels.lastIndex] = max(0.08f, value.coerceIn(0f, 1f)); invalidate()
     }
+    fun reset() {
+        levels.fill(0.08f)
+        invalidate()
+    }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas); val gap = width / 9f; val center = height / 2f
         for (i in levels.indices) { val h = dp(6f) + levels[i] * (height - dp(14f)); val x = gap * (i + 1.5f); canvas.drawLine(x, center - h/2, x, center + h/2, paint) }
