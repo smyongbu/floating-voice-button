@@ -1,32 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/mainRoot" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#F5F7FB" android:fillViewport="true">
- <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
-  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="安卓语音输入" android:textColor="#0F172A" android:textSize="28sp" android:textStyle="bold"/>
-  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="本地实时识别、整体校正与识别历史" android:textColor="#475569" android:textSize="15sp"/>
-  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:background="@drawable/panel_background" android:orientation="vertical">
-   <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="识别方案" android:textColor="#0F172A" android:textSize="18sp" android:textStyle="bold"/>
-   <RadioGroup android:id="@+id/engineGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
-    <RadioButton android:id="@+id/dualOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56dp" android:paddingVertical="6dp" android:text="实时识别＋整体校正（推荐）\nZipformer 边说边显示，Paraformer 停止后重新校正全文" android:textColor="#0F172A" android:textSize="15sp"/>
-    <RadioButton android:id="@+id/zipformerOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56dp" android:paddingVertical="6dp" android:text="仅 Zipformer 实时识别\n速度最快，停止后直接采用实时结果" android:textColor="#0F172A" android:textSize="15sp"/>
-    <RadioButton android:id="@+id/paraformerOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56dp" android:paddingVertical="6dp" android:text="仅 Paraformer 整段识别\n录音时只显示波形，停止后一次生成全文" android:textColor="#0F172A" android:textSize="15sp"/>
-    <RadioButton android:id="@+id/systemOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56dp" android:paddingVertical="6dp" android:text="手机系统默认识别\n使用小米语音服务，可能需要网络" android:textColor="#0F172A" android:textSize="15sp"/>
-   </RadioGroup>
-   <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="14dp" android:background="#D7E0EC"/>
-   <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="本地模型性能要求" android:textColor="#0F172A" android:textSize="17sp" android:textStyle="bold"/>
-   <TextView android:id="@+id/performanceText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:lineSpacingExtra="3dp" android:text="正在读取本机配置…" android:textColor="#334155" android:textSize="13sp"/>
-  </LinearLayout>
-  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:background="@drawable/panel_background" android:orientation="vertical">
-   <TextView android:id="@+id/statusText" android:layout_width="match_parent" android:layout_height="wrap_content" android:accessibilityLiveRegion="polite" android:text="准备就绪" android:textColor="#0F172A" android:textSize="17sp" android:textStyle="bold"/>
-   <com.smyongbu.voiceinput.WaveformView android:id="@+id/waveform" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginTop="8dp" android:contentDescription="实时收音波形" android:visibility="invisible"/>
-   <TextView android:id="@+id/transcriptText" android:layout_width="match_parent" android:layout_height="140dp" android:layout_marginTop="4dp" android:background="#F8FAFC" android:gravity="top|start" android:padding="14dp" android:text="识别文字会显示在这里" android:textColor="#334155" android:textIsSelectable="true" android:textSize="18sp"/>
-   <Button android:id="@+id/recordButton" android:layout_width="match_parent" android:layout_height="58dp" android:layout_marginTop="16dp" android:background="@drawable/primary_button" android:text="开始识别" android:textAllCaps="false" android:textColor="#FFFFFF" android:textSize="17sp" android:textStyle="bold"/>
-   <Button android:id="@+id/overlayButton" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="10dp" android:background="@drawable/secondary_button" android:text="开启悬浮小球" android:textAllCaps="false" android:textColor="#1D4ED8" android:textSize="15sp"/>
-   <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="horizontal">
-    <Button android:id="@+id/historyButton" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:background="@drawable/secondary_button" android:text="识别历史" android:textAllCaps="false" android:textColor="#1D4ED8" android:textSize="15sp"/>
-    <Space android:layout_width="10dp" android:layout_height="1dp"/>
-    <Button android:id="@+id/copyButton" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:background="@drawable/secondary_button" android:text="复制文字" android:textAllCaps="false" android:textColor="#1D4ED8" android:textSize="15sp"/>
-   </LinearLayout>
-  </LinearLayout>
-  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="历史最多保存 500 条，只保存在本机；本地识别不会上传录音。" android:textColor="#475569" android:textSize="12sp"/>
- </LinearLayout>
-</ScrollView>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/mainRoot" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#F5F7FB" android:orientation="vertical">
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="安卓语音输入" android:textColor="#0F172A" android:textSize="28sp" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="本地实时识别、整体校正与识别历史" android:textColor="#475569" android:textSize="15sp" />
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:background="@drawable/panel_background" android:orientation="vertical">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="识别方案" android:textColor="#0F172A" android:textSize="18sp" android:textStyle="bold" />
+                <RadioGroup android:id="@+id/engineGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+                    <RadioButton android:id="@+id/dualOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="92dp" android:paddingVertical="10dp" android:text="实时识别＋整体校正（推荐）&#10;语言：实时和最终均支持中文、英文及中英混说&#10;性能：最低 4 核处理器、6 GB 内存；推荐 8 GB 以上；估算占用 500～800 MB" android:textColor="#0F172A" android:textSize="14sp" />
+                    <RadioButton android:id="@+id/zipformerOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="92dp" android:paddingVertical="10dp" android:text="仅 Zipformer 实时识别&#10;语言：支持中文、英文及中英混说&#10;性能：模型约 60 MB；最低 4 核处理器、4 GB 内存；推荐 6 GB；估算占用 200～350 MB" android:textColor="#0F172A" android:textSize="14sp" />
+                    <RadioButton android:id="@+id/paraformerOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="92dp" android:paddingVertical="10dp" android:text="仅 Paraformer 整段识别&#10;语言：支持中文、英文和中英混说&#10;性能：模型约 82 MB；最低 4 核处理器、4 GB 内存；推荐 8 GB；估算占用 250～450 MB" android:textColor="#0F172A" android:textSize="14sp" />
+                    <RadioButton android:id="@+id/systemOption" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="64dp" android:paddingVertical="10dp" android:text="手机系统默认识别&#10;语言与性能取决于手机当前语音服务，可能需要网络" android:textColor="#0F172A" android:textSize="14sp" />
+                </RadioGroup>
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="14dp" android:background="#D7E0EC" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="本机适用情况" android:textColor="#0F172A" android:textSize="17sp" android:textStyle="bold" />
+                <TextView android:id="@+id/performanceText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:lineSpacingExtra="3dp" android:text="正在读取本机配置…" android:textColor="#334155" android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:background="@drawable/panel_background" android:orientation="vertical">
+                <TextView android:id="@+id/statusText" android:layout_width="match_parent" android:layout_height="wrap_content" android:accessibilityLiveRegion="polite" android:text="准备就绪" android:textColor="#0F172A" android:textSize="17sp" android:textStyle="bold" />
+                <com.smyongbu.voiceinput.WaveformView android:id="@+id/waveform" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginTop="8dp" android:contentDescription="实时收音波形" android:visibility="invisible" />
+                <TextView android:id="@+id/transcriptText" android:layout_width="match_parent" android:layout_height="140dp" android:layout_marginTop="4dp" android:background="#F8FAFC" android:gravity="top|start" android:padding="14dp" android:text="识别文字会显示在这里" android:textColor="#334155" android:textIsSelectable="true" android:textSize="18sp" />
+                <Button android:id="@+id/recordButton" android:layout_width="match_parent" android:layout_height="58dp" android:layout_marginTop="16dp" android:background="@drawable/primary_button" android:text="开始识别" android:textAllCaps="false" android:textColor="#FFFFFF" android:textSize="17sp" android:textStyle="bold" />
+                <Button android:id="@+id/overlayButton" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="10dp" android:background="@drawable/secondary_button" android:text="开启悬浮小球" android:textAllCaps="false" android:textColor="#1D4ED8" android:textSize="15sp" />
+                <Button android:id="@+id/copyButton" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="10dp" android:background="@drawable/secondary_button" android:text="复制文字" android:textAllCaps="false" android:textColor="#1D4ED8" android:textSize="15sp" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:layout_marginBottom="4dp" android:text="历史最多保存 500 条，只保存在本机；本地识别不会上传录音。" android:textColor="#475569" android:textSize="12sp" />
+        </LinearLayout>
+    </ScrollView>
+    <include layout="@layout/bottom_navigation" />
+</LinearLayout>

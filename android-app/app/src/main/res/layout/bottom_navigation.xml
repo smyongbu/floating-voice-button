@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="72dp" android:background="@drawable/bottom_nav_background" android:gravity="center" android:orientation="horizontal" android:paddingHorizontal="12dp" android:paddingVertical="8dp">
+    <Button android:id="@+id/navRecognition" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:background="@drawable/nav_item_unselected" android:drawableStart="@drawable/ic_nav_microphone" android:drawablePadding="8dp" android:gravity="center" android:minHeight="56dp" android:text="语音识别" android:textAllCaps="false" android:textColor="@color/nav_unselected" android:textSize="14sp" />
+    <Space android:layout_width="8dp" android:layout_height="1dp" />
+    <Button android:id="@+id/navHistory" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:background="@drawable/nav_item_unselected" android:drawableStart="@drawable/ic_nav_history" android:drawablePadding="8dp" android:gravity="center" android:minHeight="56dp" android:text="识别历史" android:textAllCaps="false" android:textColor="@color/nav_unselected" android:textSize="14sp" />
+</LinearLayout>

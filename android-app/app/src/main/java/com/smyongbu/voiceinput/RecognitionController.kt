@@ -21,7 +21,7 @@ import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
-import com.k2fsa.sherpa.onnx.OnlineZipformer2CtcModelConfig
+import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -193,17 +193,19 @@ object RecognitionController {
         cachedOnline?.let { return it }
         synchronized(modelLock) {
             cachedOnline?.let { return it }
-            val dir = "models/zipformer"
+            val dir = "models/zipformer-bilingual"
             return OnlineRecognizer(
                 app.assets,
                 OnlineRecognizerConfig(
                     modelConfig = OnlineModelConfig(
-                        zipformer2Ctc = OnlineZipformer2CtcModelConfig("$dir/model.int8.onnx"),
+                        transducer = OnlineTransducerModelConfig(
+                            encoder = "$dir/encoder-epoch-99-avg-1.int8.onnx",
+                            decoder = "$dir/decoder-epoch-99-avg-1.onnx",
+                            joiner = "$dir/joiner-epoch-99-avg-1.int8.onnx"
+                        ),
                         tokens = "$dir/tokens.txt",
                         numThreads = 2,
-                        provider = "cpu",
-                        modelingUnit = "bpe",
-                        bpeVocab = "$dir/bbpe.model"
+                        provider = "cpu"
                     ),
                     enableEndpoint = false
                 )
@@ -409,7 +411,7 @@ object RecognitionController {
                     if (useRealtime) {
                         stream!!.acceptWaveform(samples, 16000)
                         while (online!!.isReady(stream)) online.decode(stream)
-                        val partial = online.getResult(stream).text.trim()
+                        val partial = RecognitionText.cleanRealtime(online.getResult(stream).text)
                         if (partial.isNotEmpty() && partial != session.text) {
                             session.text = partial
                             publish(session, true, "正在本地实时识别…", partial)
@@ -432,7 +434,7 @@ object RecognitionController {
                 if (useRealtime) {
                     stream!!.inputFinished()
                     while (online!!.isReady(stream)) online.decode(stream)
-                    realtime = online.getResult(stream).text.trim().ifBlank { session.text }
+                    realtime = RecognitionText.cleanRealtime(online.getResult(stream).text).ifBlank { session.text }
                     stream.release()
                     stream = null
                 }

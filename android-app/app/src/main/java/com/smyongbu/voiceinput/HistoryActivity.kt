@@ -14,7 +14,7 @@ import java.util.Locale
 
 class HistoryActivity : Activity() {
     private lateinit var store:HistoryStore;private lateinit var list:ListView;private lateinit var count:TextView;private lateinit var adapter:HistoryAdapter
-    override fun onCreate(state:Bundle?){super.onCreate(state);setContentView(R.layout.activity_history);applySystemInsets(findViewById(R.id.historyRoot));store=HistoryStore(this);list=findViewById(R.id.historyList);count=findViewById(R.id.historyCount);list.emptyView=findViewById(R.id.emptyText);adapter=HistoryAdapter();list.adapter=adapter;findViewById<Button>(R.id.backButton).setOnClickListener{finish()};findViewById<Button>(R.id.clearButton).setOnClickListener{confirmClear()}}
+    override fun onCreate(state:Bundle?){super.onCreate(state);setContentView(R.layout.activity_history);applySystemInsets(findViewById(R.id.historyRoot));setupBottomNavigation(NAV_HISTORY);store=HistoryStore(this);list=findViewById(R.id.historyList);count=findViewById(R.id.historyCount);list.emptyView=findViewById(R.id.emptyText);adapter=HistoryAdapter();list.adapter=adapter;findViewById<Button>(R.id.clearButton).setOnClickListener{confirmClear()}}
     override fun onResume(){super.onResume();render()}
     override fun onDestroy(){store.close();super.onDestroy()}
     private fun render(){val items=store.list(500);count.text="${items.size} 条记录";adapter.items=items;adapter.notifyDataSetChanged()}
