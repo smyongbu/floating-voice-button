@@ -67,6 +67,18 @@
           </div>
         </section>
 
+        <button id="activeModelsButton" class="active-models-card" type="button" aria-label="查看当前识别模型">
+          <span class="active-models-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M7 7.5A3.5 3.5 0 1 1 10.5 11H7V7.5Z"></path><path d="M17 7.5A3.5 3.5 0 1 0 13.5 11H17V7.5Z"></path><path d="M7 16.5A3.5 3.5 0 1 0 10.5 13H7v3.5Z"></path><path d="M17 16.5A3.5 3.5 0 1 1 13.5 13H17v3.5Z"></path></svg>
+          </span>
+          <span class="active-models-copy">
+            <small>当前识别模型</small>
+            <strong id="activeModelsTitle">Zipformer ＋ Paraformer</strong>
+            <span id="activeModelsDetail">实时出字，并在停止后分段校正</span>
+          </span>
+          <svg class="active-models-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg>
+        </button>
+
         <section class="transcript-card" aria-labelledby="transcriptTitle">
           <div class="section-heading compact-heading">
             <div>
@@ -139,17 +151,17 @@
             <label class="engine-card">
               <input type="radio" name="engine" value="local_dual">
               <span class="radio-mark" aria-hidden="true"></span>
-              <span class="engine-copy"><strong>实时识别＋整段校正</strong><small>中文、英文和中英混说；停止后再校正全文</small><em>约占 135.5 MB</em></span>
+              <span class="engine-copy"><strong>Zipformer ＋ Paraformer</strong><small>两套模型：实时出字，停止后按语音片段校正</small><em>推荐 · 2 套模型 · 约 135.5 MB</em></span>
             </label>
             <label class="engine-card">
               <input type="radio" name="engine" value="local_zipformer">
               <span class="radio-mark" aria-hidden="true"></span>
-              <span class="engine-copy"><strong>仅实时识别</strong><small>边说边显示，适合响应优先或内存较小的手机</small><em>约占 57.4 MB</em></span>
+              <span class="engine-copy"><strong>仅 Zipformer</strong><small>一套实时模型：边说边显示，响应更快</small><em>1 套模型 · 约 57.4 MB</em></span>
             </label>
             <label class="engine-card">
               <input type="radio" name="engine" value="local_paraformer">
               <span class="radio-mark" aria-hidden="true"></span>
-              <span class="engine-copy"><strong>仅整段识别</strong><small>停止后一次生成全文，不显示实时临时文字</small><em>约占 78.1 MB</em></span>
+              <span class="engine-copy"><strong>仅 Paraformer</strong><small>一套整段模型：停止后生成文字，不显示实时结果</small><em>1 套模型 · 约 78.1 MB</em></span>
             </label>
             <label class="engine-card">
               <input type="radio" name="engine" value="system">

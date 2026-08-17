@@ -41,6 +41,9 @@
     recognitionAnnouncement: document.getElementById("recognitionAnnouncement"),
     copyTranscriptButton: document.getElementById("copyTranscriptButton"),
     resourceNotice: document.getElementById("resourceNotice"),
+    activeModelsButton: document.getElementById("activeModelsButton"),
+    activeModelsTitle: document.getElementById("activeModelsTitle"),
+    activeModelsDetail: document.getElementById("activeModelsDetail"),
     historyCount: document.getElementById("historyCount"),
     historySearch: document.getElementById("historySearch"),
     historyEmpty: document.getElementById("historyEmpty"),
@@ -321,6 +324,14 @@
     previousRecognitionActive = active;
     waveform.setActive(capturing);
     elements.resourceNotice.classList.toggle("is-hidden", !hasMissingRequiredResources());
+    const modelCopy = {
+      local_dual: ["Zipformer ＋ Paraformer", "2 套模型 · 实时出字，停止后分段校正"],
+      local_zipformer: ["仅 Zipformer", "1 套模型 · 只做实时识别"],
+      local_paraformer: ["仅 Paraformer", "1 套模型 · 停止后生成全文"],
+      system: ["手机系统识别", "不使用本地模型 · 可能联网"]
+    }[state.settings.engine] || ["正在读取模型", "请稍候"];
+    elements.activeModelsTitle.textContent = modelCopy[0];
+    elements.activeModelsDetail.textContent = modelCopy[1];
   }
 
   function renderHistory() {
@@ -605,6 +616,7 @@
   elements.cancelButton.addEventListener("click", () => callNative("cancelRecognition"));
   elements.copyTranscriptButton.addEventListener("click", () => callNative("copyText", state.recognition.text || ""));
   elements.resourceNotice.addEventListener("click", () => navigate("settings"));
+  elements.activeModelsButton.addEventListener("click", () => navigate("settings"));
   elements.historySearch.addEventListener("input", (event) => {
     state.historyQuery = event.target.value || "";
     state.historyVisibleCount = 40;

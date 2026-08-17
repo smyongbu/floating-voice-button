@@ -495,8 +495,9 @@ object RecognitionController {
                     maxOf(minimum * 2, 6400)
                 )
                 audioRecord = record
-                val chunks = ArrayList<FloatArray>()
-                var totalSamples = 0
+                val correctionSegments = ArrayList<FloatArray>()
+                val pendingCorrectionChunks = ArrayList<FloatArray>()
+                var pendingCorrectionSamples = 0
                 var recordedSamples = 0
                 var nextHeartbeat = 16000 * 15
                 val maxSamples = 16000 * 60 * 10
@@ -522,8 +523,8 @@ object RecognitionController {
                     recordedSamples += count
                     session.recordedSamples = recordedSamples
                     if (useCorrection) {
-                        chunks += samples
-                        totalSamples += count
+                        pendingCorrectionChunks += samples
+                        pendingCorrectionSamples += count
                     }
                     publishLevel(session, AudioLevelMeter.fromPcm16(shorts, count))
                     if (useRealtime) {
@@ -538,6 +539,14 @@ object RecognitionController {
                         }
                         if (online!!.isEndpoint(stream)) {
                             committedText = RecognitionText.combineSegments(committedText, partial)
+                            if (useCorrection && pendingCorrectionSamples > 0) {
+                                correctionSegments += flattenSamples(
+                                    pendingCorrectionChunks,
+                                    pendingCorrectionSamples
+                                )
+                                pendingCorrectionChunks.clear()
+                                pendingCorrectionSamples = 0
+                            }
                             online.reset(stream)
                             session.endpointCount++
                             session.text = committedText
@@ -573,24 +582,30 @@ object RecognitionController {
                     stream.release()
                     stream = null
                 }
-                val all = if (useCorrection) {
-                    FloatArray(totalSamples).also { target ->
-                        var offset = 0
-                        chunks.forEach { part ->
-                            part.copyInto(target, offset)
-                            offset += part.size
-                        }
-                    }
-                } else FloatArray(0)
+                if (useCorrection && pendingCorrectionSamples > 0) {
+                    correctionSegments += flattenSamples(
+                        pendingCorrectionChunks,
+                        pendingCorrectionSamples
+                    )
+                }
                 var correctionFailed = false
                 val corrected = if (useCorrection) {
                     try {
-                        runParaformer(all)
+                        var correctedText = ""
+                        correctionSegments.forEachIndexed { index, segment ->
+                            val segmentText = runParaformer(segment)
+                            correctedText = RecognitionText.combineSegments(correctedText, segmentText)
+                            logger.info(
+                                "分段校正完成，片段=${index + 1}/${correctionSegments.size}，样本=${segment.size}，字符数=${segmentText.length}",
+                                operationId(session)
+                            )
+                        }
+                        correctedText
                     } catch (error: Exception) {
                         if (!useRealtime) throw error
                         correctionFailed = true
                         logger.error(
-                            "整段校正失败，改用实时识别结果，方式=$engine",
+                            "分段校正失败，改用实时识别结果，方式=$engine",
                             error,
                             operationId(session)
                         )
@@ -609,9 +624,10 @@ object RecognitionController {
                     finish(
                         session,
                         if (finalText.isBlank()) "没有识别到文字，请再试一次。"
-                        else if (correctionFailed) "整段校正失败，已保留实时结果"
+                        else if (correctionFailed) "分段校正失败，已保留实时结果"
                         else if (useCorrection && final.source == RecognitionResultSource.REALTIME) "已保留更完整的实时结果"
-                        else if (useCorrection) "整段校正完成" else "实时识别完成",
+                        else if (useCorrection && useRealtime) "分段校正完成"
+                        else if (useCorrection) "整段识别完成" else "实时识别完成",
                         finalText,
                         finalText.isNotBlank()
                     )
@@ -644,6 +660,17 @@ object RecognitionController {
             RecognitionText.cleanRealtime(offline.getResult(stream).text)
         } finally {
             stream.release()
+        }
+    }
+
+    private fun flattenSamples(chunks: List<FloatArray>, totalSamples: Int): FloatArray {
+        if (totalSamples <= 0) return FloatArray(0)
+        return FloatArray(totalSamples).also { target ->
+            var offset = 0
+            chunks.forEach { part ->
+                part.copyInto(target, offset)
+                offset += part.size
+            }
         }
     }
 

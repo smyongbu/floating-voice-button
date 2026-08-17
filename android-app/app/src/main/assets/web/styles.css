@@ -527,6 +527,41 @@ button:disabled {
   transition: background-color var(--duration-fast) ease, transform var(--duration-fast) var(--ease-out);
 }
 
+.active-models-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 18px;
+  padding: 13px 14px;
+  color: var(--color-text);
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-card);
+}
+
+.active-models-card:active { transform: scale(0.985); }
+
+.active-models-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  color: var(--color-primary);
+  border-radius: 14px;
+  background: var(--color-primary-soft);
+}
+
+.active-models-icon svg { width: 23px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.active-models-copy { min-width: 0; display: grid; gap: 2px; }
+.active-models-copy small { color: var(--color-text-tertiary); font-size: 0.75rem; }
+.active-models-copy strong { overflow: hidden; font-size: 0.94rem; text-overflow: ellipsis; white-space: nowrap; }
+.active-models-copy span { color: var(--color-text-secondary); font-size: 0.78rem; }
+.active-models-chevron { width: 19px; fill: none; stroke: var(--color-text-tertiary); stroke-width: 2; }
+
 .resource-notice svg {
   width: 22px;
   height: 22px;
