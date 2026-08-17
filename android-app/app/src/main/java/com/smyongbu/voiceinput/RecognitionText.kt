@@ -38,6 +38,9 @@ internal object RecognitionText {
         if (finalLength * 10 < liveLength * 7) {
             return FinalRecognition(live, RecognitionResultSource.REALTIME)
         }
+        if (finalLength > liveLength * 2 + 8) {
+            return FinalRecognition(live, RecognitionResultSource.REALTIME)
+        }
 
         if (textualSimilarity(live, final) < 0.42) {
             return FinalRecognition(live, RecognitionResultSource.REALTIME)
