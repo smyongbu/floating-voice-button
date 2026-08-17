@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "resources": [
+    {
+      "id": "zipformer-bilingual",
+      "name": "中英双语实时模型",
+      "purpose": "边说边显示中文、英文和中英混说结果",
+      "version": "2024-03-20-exp32-int8",
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t",
+      "files": [
+        {
+          "path": "encoder-epoch-99-avg-1.int8.onnx",
+          "bytes": 42980793,
+          "sha256": "db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb",
+          "url": "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/exp/32/encoder-epoch-99-avg-1.int8.onnx"
+        },
+        {
+          "path": "decoder-epoch-99-avg-1.onnx",
+          "bytes": 13877276,
+          "sha256": "89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906",
+          "url": "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/exp/32/decoder-epoch-99-avg-1.onnx"
+        },
+        {
+          "path": "joiner-epoch-99-avg-1.int8.onnx",
+          "bytes": 3228485,
+          "sha256": "bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9",
+          "url": "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/exp/32/joiner-epoch-99-avg-1.int8.onnx"
+        },
+        {
+          "path": "tokens.txt",
+          "bytes": 56317,
+          "sha256": "a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3",
+          "url": "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/data/lang_char_bpe/tokens.txt"
+        }
+      ]
+    },
+    {
+      "id": "paraformer",
+      "name": "中英双语整段校正模型",
+      "purpose": "停止后重新校正完整句子，改善长句连贯度",
+      "version": "2024-03-09-small-int8",
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09",
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "bytes": 81828675,
+          "sha256": "3ef6c19369b912f7caf3cef8e545c5ccd1a33d9d7ec792a46668dc41c4b229ec",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/63ddc3cd0f2810b68289a7b3876e62ef5d53d6df/model.int8.onnx"
+        },
+        {
+          "path": "tokens.txt",
+          "bytes": 75352,
+          "sha256": "4b2d964e18b9cf139b473003b6698fb2ed9a2a5ec55b93daa677b28f578897aa",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/63ddc3cd0f2810b68289a7b3876e62ef5d53d6df/tokens.txt"
+        }
+      ]
+    }
+  ]
+}

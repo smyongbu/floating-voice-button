@@ -1,111 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/mainRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5F7FB"
-    android:orientation="vertical">
+    android:background="@android:color/transparent">
 
-    <ScrollView
+    <WebView
+        android:id="@+id/webView"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="20dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="录音"
-                android:textColor="#0F172A"
-                android:textSize="28sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="点击开始识别，说话时会显示实时声波。"
-                android:textColor="#475569"
-                android:textSize="15sp" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                android:background="@drawable/panel_background"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/statusText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:accessibilityLiveRegion="polite"
-                    android:text="准备就绪"
-                    android:textColor="#0F172A"
-                    android:textSize="17sp"
-                    android:textStyle="bold" />
-
-                <com.smyongbu.voiceinput.WaveformView
-                    android:id="@+id/waveform"
-                    android:layout_width="match_parent"
-                    android:layout_height="64dp"
-                    android:layout_marginTop="10dp"
-                    android:contentDescription="实时收音声波"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/transcriptText"
-                    android:layout_width="match_parent"
-                    android:layout_height="220dp"
-                    android:layout_marginTop="12dp"
-                    android:background="#F8FAFC"
-                    android:gravity="top|start"
-                    android:padding="14dp"
-                    android:text="识别文字会显示在这里"
-                    android:textColor="#334155"
-                    android:textIsSelectable="true"
-                    android:textSize="18sp" />
-
-                <Button
-                    android:id="@+id/recordButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="58dp"
-                    android:layout_marginTop="16dp"
-                    android:background="@drawable/primary_button"
-                    android:text="开始识别"
-                    android:textAllCaps="false"
-                    android:textColor="#FFFFFF"
-                    android:textSize="17sp"
-                    android:textStyle="bold" />
-
-                <Button
-                    android:id="@+id/copyButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="52dp"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/secondary_button"
-                    android:text="复制文字"
-                    android:textAllCaps="false"
-                    android:textColor="#1D4ED8"
-                    android:textSize="15sp" />
-            </LinearLayout>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:layout_marginBottom="4dp"
-                android:text="识别完成后会自动保存到记录页面。"
-                android:textColor="#475569"
-                android:textSize="12sp" />
-        </LinearLayout>
-    </ScrollView>
-
-    <include layout="@layout/bottom_navigation" />
-</LinearLayout>
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        android:contentDescription="悬浮语音按钮主界面"
+        android:importantForAccessibility="yes" />
+</FrameLayout>

@@ -19,6 +19,14 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(context, "识别历史.d
             while (c.moveToNext()) result += HistoryItem(c.getLong(0), c.getString(1), c.getString(2), c.getString(3))
         }; return result
     }
+    @Synchronized fun get(id: Long): HistoryItem? {
+        readableDatabase.rawQuery(
+            "SELECT id,text,created_at,engine FROM history WHERE id=? LIMIT 1",
+            arrayOf(id.toString())
+        ).use { c ->
+            return if (c.moveToFirst()) HistoryItem(c.getLong(0), c.getString(1), c.getString(2), c.getString(3)) else null
+        }
+    }
     @Synchronized fun clear() { writableDatabase.delete("history", null, null) }
     @Synchronized fun delete(id: Long) { writableDatabase.delete("history", "id=?", arrayOf(id.toString())) }
 }

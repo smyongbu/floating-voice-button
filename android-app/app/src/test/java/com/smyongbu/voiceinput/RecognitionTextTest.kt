@@ -11,4 +11,58 @@ class RecognitionTextTest {
     @Test fun internalTokenOnlyBecomesEmpty() {
         assertEquals("", RecognitionText.cleanRealtime(" <nuk> "))
     }
+
+    @Test fun preservesWordsRepeatedAcrossEndpointSegments() {
+        assertEquals(
+            "VERY VERY GOOD",
+            RecognitionText.combineSegments("VERY", "VERY GOOD")
+        )
+        assertEquals("好好我们继续", RecognitionText.combineSegments("好", "好我们继续"))
+    }
+
+    @Test fun combinesChineseAndEnglishWithReadableSpacing() {
+        assertEquals("请打开 Wi-Fi", RecognitionText.combineSegments("请打开", "Wi-Fi"))
+        assertEquals("OpenAI 明天下午", RecognitionText.combineSegments("OpenAI", "明天下午"))
+    }
+
+    @Test fun keepsLongerRealtimeResultWhenCorrectionDropsMostOfSentence() {
+        val result = RecognitionText.chooseFinal(
+            "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",
+            "THE QUICK FOX"
+        )
+        assertEquals(RecognitionResultSource.REALTIME, result.source)
+        assertEquals("THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG", result.text)
+    }
+
+    @Test fun keepsRealtimeWhenEnglishCorrectionIsFragmented() {
+        val result = RecognitionText.chooseFinal(
+            "OPEN AI GPT FIVE WILL START NOW",
+            "OPEN A I G P T FIVE WILL START NOW"
+        )
+        assertEquals(RecognitionResultSource.REALTIME, result.source)
+    }
+
+    @Test fun keepsRealtimeWhenSimilarLengthCorrectionHasDifferentContent() {
+        val result = RecognitionText.chooseFinal(
+            "PLEASE OPEN WIFI AND SEARCH OPEN AI",
+            "明天下午记得带雨伞去公园散步"
+        )
+        assertEquals(RecognitionResultSource.REALTIME, result.source)
+    }
+
+    @Test fun usesRelatedCorrectionWhenMeaningfulContentIsPreserved() {
+        val result = RecognitionText.chooseFinal(
+            "PLEASE OPEN WIFI AND SEARCH OPEN AI",
+            "PLEASE OPEN WI-FI AND SEARCH OPENAI"
+        )
+        assertEquals(RecognitionResultSource.CORRECTED, result.source)
+    }
+
+    @Test fun usesCorrectionWhenItRecoversAFullMixedLanguageSentence() {
+        val result = RecognitionText.chooseFinal(
+            "请打开",
+            "请打开 Wi-Fi and search OpenAI GPT five 明天下午 three thirty 开会"
+        )
+        assertEquals(RecognitionResultSource.CORRECTED, result.source)
+    }
 }

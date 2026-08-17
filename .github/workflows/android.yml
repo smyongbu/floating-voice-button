@@ -25,12 +25,49 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - name: 测试、检查并构建 APK
-        run: gradle --no-daemon -p android-app testDebugUnitTest lintDebug assembleDebug
+      - name: 校验模型资源清单
+        run: python -B -m unittest discover -s android-app/scripts/tests -v
+      - name: 检查网页脚本语法
+        run: node --check android-app/app/src/main/assets/web/app.js
+      - name: 确认模型没有放进应用源码
+        run: |
+          if find android-app/app/src/main -type f \( -name '*.onnx' -o -name '*.model' \) | grep -q .; then
+            echo '错误：模型文件不得放进 APK assets。'
+            exit 1
+          fi
+      - name: 运行安卓单元测试
+        run: gradle --no-daemon -p android-app testDebugUnitTest
+      - name: 运行安卓代码检查
+        run: gradle --no-daemon -p android-app lintDebug
+      - name: 准备固定开发签名
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/android-signing.jks"
+          test -s "$RUNNER_TEMP/android-signing.jks"
+      - name: 构建安卓安装包
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/android-signing.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon -p android-app assembleDebug
+      - name: 验证安装包签名
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose android-app/app/build/outputs/apk/debug/app-debug.apk
+      - name: 检查安装包不含模型
+        run: |
+          if unzip -l android-app/app/build/outputs/apk/debug/app-debug.apk | grep -E '\.(onnx|model)[[:space:]]*$'; then
+            echo '错误：安装包中发现模型文件。'
+            exit 1
+          fi
       - name: 保存安卓安装包
         uses: actions/upload-artifact@v4
         with:
-          name: 安卓语音输入-中英实时识别版
+          name: 安卓语音输入-HTML界面-模型独立版
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
