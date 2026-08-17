@@ -58,10 +58,18 @@ class RecognitionTextTest {
         assertEquals(RecognitionResultSource.CORRECTED, result.source)
     }
 
-    @Test fun usesCorrectionWhenItRecoversAFullMixedLanguageSentence() {
+    @Test fun rejectsUnrelatedLongCorrectionEvenWhenItContainsTheRealtimeTail() {
         val result = RecognitionText.chooseFinal(
-            "请打开",
-            "请打开 Wi-Fi and search OpenAI GPT five 明天下午 three thirty 开会"
+            "今天我们测试实时与 coqteon test",
+            "人依依旧他上上线类似于你妈小时候会给定的婴儿杂志上投到你的照今天我们测试实时与 coqteon test"
+        )
+        assertEquals(RecognitionResultSource.REALTIME, result.source)
+    }
+
+    @Test fun usesRelatedCorrectionWhenItAddsModerateMixedLanguageContent() {
+        val result = RecognitionText.chooseFinal(
+            "请打开 Wi-Fi and search OpenAI",
+            "请打开 Wi-Fi and search OpenAI GPT five"
         )
         assertEquals(RecognitionResultSource.CORRECTED, result.source)
     }

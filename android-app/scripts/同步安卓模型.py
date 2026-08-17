@@ -215,14 +215,32 @@ def ensure_device_space(adb: str, serial: str, required_file_bytes: int) -> None
 def remote_file_info(adb: str, serial: str, relative_path: str) -> tuple[int, str] | None:
     if not SAFE_REMOTE.fullmatch(relative_path):
         raise ValueError("远端路径不安全")
-    command = f"if [ -f {relative_path} ]; then wc -c < {relative_path}; sha256sum {relative_path}; fi"
-    result = adb_command(adb, serial, "shell", "run-as", PACKAGE_NAME, "sh", "-c", command, check=False)
-    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    if result.returncode != 0 or len(lines) < 2:
+    size_result = adb_command(
+        adb,
+        serial,
+        "shell",
+        "run-as",
+        PACKAGE_NAME,
+        "wc",
+        "-c",
+        relative_path,
+        check=False,
+    )
+    hash_result = adb_command(
+        adb,
+        serial,
+        "shell",
+        "run-as",
+        PACKAGE_NAME,
+        "sha256sum",
+        relative_path,
+        check=False,
+    )
+    if size_result.returncode != 0 or hash_result.returncode != 0:
         return None
     try:
-        size = int(lines[0])
-        digest = lines[1].split()[0].lower()
+        size = int(size_result.stdout.split()[0])
+        digest = hash_result.stdout.split()[0].lower()
     except (ValueError, IndexError):
         return None
     return size, digest

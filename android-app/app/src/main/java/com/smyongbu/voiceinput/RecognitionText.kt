@@ -39,8 +39,7 @@ internal object RecognitionText {
             return FinalRecognition(live, RecognitionResultSource.REALTIME)
         }
 
-        val correctionAddsSubstantialContent = finalLength * 10 >= liveLength * 13
-        if (!correctionAddsSubstantialContent && textualSimilarity(live, final) < 0.42) {
+        if (textualSimilarity(live, final) < 0.42) {
             return FinalRecognition(live, RecognitionResultSource.REALTIME)
         }
 
