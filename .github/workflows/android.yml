@@ -38,7 +38,15 @@ jobs:
       - name: 运行安卓单元测试
         run: gradle --no-daemon -p android-app testDebugUnitTest
       - name: 运行安卓代码检查
-        run: gradle --no-daemon -p android-app lintDebug
+        run: |
+          set +e
+          gradle --no-daemon -p android-app lintDebug
+          STATUS=$?
+          REPORT="android-app/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
+          if [ -f "$REPORT" ]; then
+            cat "$REPORT"
+          fi
+          exit "$STATUS"
       - name: 准备固定开发签名
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
