@@ -10,6 +10,6 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@android:color/transparent"
-        android:contentDescription="悬浮语音按钮主界面"
+        android:contentDescription="@string/main_screen_description"
         android:importantForAccessibility="yes" />
 </FrameLayout>

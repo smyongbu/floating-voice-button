@@ -25,6 +25,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONArray
 import org.json.JSONObject
@@ -144,12 +145,12 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
     override fun onStart() {
         super.onStart()
         val filter = IntentFilter(FloatingVoiceService.ACTION_STATE_CHANGED)
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(overlayStateReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(overlayStateReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            this,
+            overlayStateReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
     }
 
     override fun onStop() {
