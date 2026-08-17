@@ -55,7 +55,9 @@ android {
 }
 
 dependencies {
-    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.5")
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.5") {
+        exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
+    }
     implementation("androidx.core:core:1.16.0")
     implementation("androidx.webkit:webkit:1.16.0")
     testImplementation("junit:junit:4.13.2")
