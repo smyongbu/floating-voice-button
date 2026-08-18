@@ -35,6 +35,7 @@ data class ModelResourceState(
 object ModelResourceManager {
     const val ZIPFORMER_ID = "zipformer-bilingual"
     const val PARAFORMER_ID = "paraformer"
+    const val QWEN_ID = "qwen3-asr-0.6b-int8"
 
     interface Listener {
         fun onModelResourcesChanged(states: List<ModelResourceState>)

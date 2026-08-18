@@ -13,6 +13,14 @@ internal object RecognitionText {
         .replace(Regex("\\s+"), " ")
         .trim()
 
+    fun formatRealtime(text: String): String = cleanRealtime(text).replace(
+        Regex("[A-Za-z]+(?:[-'][A-Za-z]+)*")
+    ) { word ->
+        word.value.replace(Regex("[A-Za-z]+")) { part ->
+            part.value.first().uppercase() + part.value.drop(1).lowercase()
+        }
+    }
+
     fun combineSegments(existing: String, incoming: String): String {
         val left = cleanRealtime(existing)
         val right = cleanRealtime(incoming)

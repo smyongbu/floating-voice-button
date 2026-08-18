@@ -693,7 +693,7 @@ button:disabled {
 .history-copy { right: 7px; bottom: 6px; color: var(--color-primary-strong); }
 .history-remove { right: 7px; top: 6px; color: var(--color-text-tertiary); }
 
-.setting-row-compact { grid-template-columns: minmax(0, 1fr) auto; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-border); }
+.setting-row.setting-row-compact { grid-template-columns: minmax(0, 1fr) auto; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-border); }
 .setting-copy h3 { margin: 0; color: var(--color-text); font-size: 0.96rem; }
 .range-setting { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-border); }
 .range-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--color-text); font-weight: 700; }

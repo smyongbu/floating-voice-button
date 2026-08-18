@@ -220,7 +220,8 @@
       settings: state.settings,
       resources: [
         { id: "zipformer-bilingual", name: "中英双语实时模型", purpose: "边说边显示中文、英文和中英混说结果", version: "2024-03-20-exp32-int8", totalBytes: 60142871, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 0, errorMessage: "" },
-        { id: "paraformer", name: "中英双语整段校正模型", purpose: "停止后重新校正完整句子，改善长句连贯度", version: "2024-03-09-small-int8", totalBytes: 81904027, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 0, errorMessage: "" }
+        { id: "paraformer", name: "中英双语整段校正模型", purpose: "停止后重新校正完整句子，改善长句连贯度", version: "2024-03-09-small-int8", totalBytes: 81904027, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 0, errorMessage: "" },
+        { id: "qwen3-asr-0.6b-int8", name: "Qwen3-ASR 0.6B INT8 高质量校正模型", purpose: "停止后高质量校正中英文和中英混说；下载较大、处理较慢", version: "2026-03-25-int8", totalBytes: 987015347, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 0, errorMessage: "" }
       ],
       history: [],
       device: { memoryGb: 12, assessment: "适合使用推荐的双模型方案" },
@@ -327,8 +328,10 @@
     elements.resourceNotice.classList.toggle("is-hidden", !hasMissingRequiredResources());
     const modelCopy = {
       local_dual: ["Zipformer ＋ Paraformer", "2 套模型 · 实时出字，停止后分段校正"],
+      local_dual_qwen: ["Zipformer ＋ Qwen3-ASR", "2 套模型 · 实时出字，停止后高质量校正"],
       local_zipformer: ["仅 Zipformer", "1 套模型 · 只做实时识别"],
       local_paraformer: ["仅 Paraformer", "1 套模型 · 停止后生成全文"],
+      local_qwen: ["仅 Qwen3-ASR", "1 套模型 · 停止后高质量生成全文"],
       system: ["手机系统识别", "不使用本地模型 · 可能联网"]
     }[state.settings.engine] || ["正在读取模型", "请稍候"];
     elements.activeModelsTitle.textContent = modelCopy[0];
@@ -576,8 +579,10 @@
   function hasMissingRequiredResources() {
     const requirements = {
       local_dual: ["zipformer-bilingual", "paraformer"],
+      local_dual_qwen: ["zipformer-bilingual", "qwen3-asr-0.6b-int8"],
       local_zipformer: ["zipformer-bilingual"],
       local_paraformer: ["paraformer"],
+      local_qwen: ["qwen3-asr-0.6b-int8"],
       system: []
     }[state.settings.engine] || [];
     return requirements.some((id) => !state.resources.some((item) => item.id === id && item.status === "available"));
@@ -598,8 +603,10 @@
   function engineName(engine) {
     return {
       local_dual: "实时＋校正",
+      local_dual_qwen: "实时＋Qwen 校正",
       local_zipformer: "仅实时",
       local_paraformer: "仅整段",
+      local_qwen: "仅 Qwen",
       system: "系统识别"
     }[engine] || "未知方式";
   }

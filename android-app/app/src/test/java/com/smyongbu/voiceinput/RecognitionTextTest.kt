@@ -12,6 +12,14 @@ class RecognitionTextTest {
         assertEquals("", RecognitionText.cleanRealtime(" <nuk> "))
     }
 
+    @Test fun realtimeEnglishUsesTitleCaseWithoutChangingFinalCleaner() {
+        assertEquals(
+            "Hello World 和 Open-Ai",
+            RecognitionText.formatRealtime("<nuk> HELLO WORLD 和 OPEN-AI")
+        )
+        assertEquals("PLEASE KEEP API", RecognitionText.cleanRealtime("PLEASE KEEP API"))
+    }
+
     @Test fun preservesWordsRepeatedAcrossEndpointSegments() {
         assertEquals(
             "VERY VERY GOOD",

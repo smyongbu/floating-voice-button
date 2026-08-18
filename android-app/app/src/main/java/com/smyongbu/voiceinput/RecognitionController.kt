@@ -15,6 +15,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineParaformerModelConfig
+import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
@@ -29,10 +30,12 @@ import java.util.concurrent.atomic.AtomicLong
 
 object RecognitionController {
     const val ENGINE_DUAL = "local_dual"
+    const val ENGINE_DUAL_QWEN = "local_dual_qwen"
     const val ENGINE_ZIPFORMER = "local_zipformer"
     const val ENGINE_PARAFORMER = "local_paraformer"
+    const val ENGINE_QWEN = "local_qwen"
     const val ENGINE_SYSTEM = "system"
-    val validEngines = setOf(ENGINE_DUAL, ENGINE_ZIPFORMER, ENGINE_PARAFORMER, ENGINE_SYSTEM)
+    val validEngines = setOf(ENGINE_DUAL, ENGINE_DUAL_QWEN, ENGINE_ZIPFORMER, ENGINE_PARAFORMER, ENGINE_QWEN, ENGINE_SYSTEM)
 
     interface Listener {
         fun onRecognitionState(listening: Boolean, status: String, text: String)
@@ -81,6 +84,7 @@ object RecognitionController {
     @Volatile private var audioRecord: AudioRecord? = null
     @Volatile private var cachedOnline: OnlineRecognizer? = null
     @Volatile private var cachedOffline: OfflineRecognizer? = null
+    @Volatile private var cachedOfflineResourceId: String? = null
     @Volatile private var modelStatus = "正在检查本地模型…"
     @Volatile private var listening = false
     @Volatile private var lastText = ""
@@ -114,6 +118,7 @@ object RecognitionController {
         app.getSharedPreferences("settings", 0).edit()
             .putString("engine", if (engine in validEngines) engine else ENGINE_DUAL)
             .apply()
+        if (!isListening()) preloadModels()
     }
 
     fun isListening() = activeSession?.finished?.get() == false
@@ -214,8 +219,19 @@ object RecognitionController {
         }
         Thread({
             val started = System.currentTimeMillis()
-            val hasOnline = ModelResourceManager.isInstalled(ModelResourceManager.ZIPFORMER_ID)
-            val hasOffline = ModelResourceManager.isInstalled(ModelResourceManager.PARAFORMER_ID)
+            val engine = selectedEngine()
+            val required = requiredResources(engine).toSet()
+            if (required.isEmpty()) {
+                modelStatus = "手机系统识别已选用"
+                currentStatus = modelStatus
+                preloadStarted.set(false)
+                notifyModelStatus()
+                if (preloadPending.getAndSet(false)) preloadModels()
+                return@Thread
+            }
+            val hasOnline = ModelResourceManager.ZIPFORMER_ID in required && ModelResourceManager.isInstalled(ModelResourceManager.ZIPFORMER_ID)
+            val correctionId = correctionResource(engine)
+            val hasOffline = correctionId != null && ModelResourceManager.isInstalled(correctionId)
             if (!hasOnline && !hasOffline) {
                 modelStatus = "请到设置页下载所需的离线模型"
                 currentStatus = modelStatus
@@ -229,7 +245,7 @@ object RecognitionController {
             notifyModelStatus()
             try {
                 if (hasOnline) getOnlineRecognizer()
-                if (hasOffline) getOfflineRecognizer()
+                if (hasOffline) getOfflineRecognizer(correctionId!!)
                 modelStatus = if (hasOnline && hasOffline) {
                     "双语实时与整段校正模型已就绪"
                 } else {
@@ -251,7 +267,7 @@ object RecognitionController {
     fun refreshModels() = preloadModels()
 
     fun refreshModel(id: String) {
-        if (id !in setOf(ModelResourceManager.ZIPFORMER_ID, ModelResourceManager.PARAFORMER_ID)) return
+        if (id !in setOf(ModelResourceManager.ZIPFORMER_ID, ModelResourceManager.PARAFORMER_ID, ModelResourceManager.QWEN_ID)) return
         if (isListening()) {
             pendingModelReloads += id
             logger.info("模型已更新，将在当前识别结束后重新加载，资源=$id", "model-reload")
@@ -268,9 +284,10 @@ object RecognitionController {
                     runCatching { cachedOnline?.release() }
                     cachedOnline = null
                 }
-                ModelResourceManager.PARAFORMER_ID -> {
+                ModelResourceManager.PARAFORMER_ID, ModelResourceManager.QWEN_ID -> {
                     runCatching { cachedOffline?.release() }
                     cachedOffline = null
+                    cachedOfflineResourceId = null
                 }
                 else -> return false
             }
@@ -310,30 +327,60 @@ object RecognitionController {
         }
     }
 
-    private fun getOfflineRecognizer(): OfflineRecognizer {
-        cachedOffline?.let { return it }
+    private fun getOfflineRecognizer(resourceId: String): OfflineRecognizer {
+        cachedOffline?.takeIf { cachedOfflineResourceId == resourceId }?.let { return it }
         synchronized(modelLock) {
-            cachedOffline?.let { return it }
-            val dir = ModelResourceManager.bundleDirectory(ModelResourceManager.PARAFORMER_ID).absolutePath
+            cachedOffline?.takeIf { cachedOfflineResourceId == resourceId }?.let { return it }
+            runCatching { cachedOffline?.release() }
+            cachedOffline = null
+            cachedOfflineResourceId = null
+            val dir = ModelResourceManager.bundleDirectory(resourceId).absolutePath
+            val modelConfig = if (resourceId == ModelResourceManager.QWEN_ID) {
+                OfflineModelConfig(
+                    qwen3Asr = OfflineQwen3AsrModelConfig(
+                        convFrontend = "$dir/conv_frontend.onnx",
+                        encoder = "$dir/encoder.int8.onnx",
+                        decoder = "$dir/decoder.int8.onnx",
+                        tokenizer = "$dir/tokenizer"
+                    ),
+                    tokens = "",
+                    numThreads = 3,
+                    provider = "cpu"
+                )
+            } else {
+                OfflineModelConfig(
+                    paraformer = OfflineParaformerModelConfig("$dir/model.int8.onnx"),
+                    tokens = "$dir/tokens.txt",
+                    numThreads = 4,
+                    provider = "cpu",
+                    modelType = "paraformer"
+                )
+            }
             return OfflineRecognizer(
                 config = OfflineRecognizerConfig(
-                    modelConfig = OfflineModelConfig(
-                        paraformer = OfflineParaformerModelConfig("$dir/model.int8.onnx"),
-                        tokens = "$dir/tokens.txt",
-                        numThreads = 4,
-                        provider = "cpu",
-                        modelType = "paraformer"
-                    )
+                    modelConfig = modelConfig
                 )
-            ).also { cachedOffline = it }
+            ).also {
+                cachedOffline = it
+                cachedOfflineResourceId = resourceId
+            }
         }
     }
 
     private fun requiredResources(engine: String): List<String> = when (engine) {
         ENGINE_DUAL -> listOf(ModelResourceManager.ZIPFORMER_ID, ModelResourceManager.PARAFORMER_ID)
+        ENGINE_DUAL_QWEN -> listOf(ModelResourceManager.ZIPFORMER_ID, ModelResourceManager.QWEN_ID)
         ENGINE_ZIPFORMER -> listOf(ModelResourceManager.ZIPFORMER_ID)
         ENGINE_PARAFORMER -> listOf(ModelResourceManager.PARAFORMER_ID)
+        ENGINE_QWEN -> listOf(ModelResourceManager.QWEN_ID)
         else -> emptyList()
+    }
+
+    private fun correctionResource(engine: String): String? = when (engine) {
+        ENGINE_DUAL -> ModelResourceManager.PARAFORMER_ID
+        ENGINE_DUAL_QWEN, ENGINE_QWEN -> ModelResourceManager.QWEN_ID
+        ENGINE_PARAFORMER -> ModelResourceManager.PARAFORMER_ID
+        else -> null
     }
 
     private fun isCurrent(session: Session, attempt: Int? = null): Boolean {
@@ -399,9 +446,10 @@ object RecognitionController {
         override fun onPartialResults(results: Bundle?) {
             if (!isCurrent(session, attempt) || session.cancelled.get()) return
             first(results).takeIf { it.isNotBlank() }?.let {
-                session.text = it
+                val preview = RecognitionText.formatRealtime(it)
+                session.text = preview
                 markResultUpdate(session)
-                publish(session, true, "正在系统实时识别…", it, "listening")
+                publish(session, true, "正在系统实时识别…", preview, "listening")
             }
         }
 
@@ -462,22 +510,23 @@ object RecognitionController {
             return
         }
         val engine = session.engine
-        val ready = (engine == ENGINE_PARAFORMER || cachedOnline != null) &&
-            (engine == ENGINE_ZIPFORMER || cachedOffline != null)
+        val correctionId = correctionResource(engine)
+        val useRealtime = engine != ENGINE_PARAFORMER && engine != ENGINE_QWEN
+        val useCorrection = correctionId != null
+        val ready = (!useRealtime || cachedOnline != null) &&
+            (!useCorrection || (cachedOffline != null && cachedOfflineResourceId == correctionId))
         publish(session, false, if (ready) "正在启动本地录音…" else "正在准备本地模型…", "", "preparing")
         Thread({
             var online: OnlineRecognizer? = null
             var stream: OnlineStream? = null
             var record: AudioRecord? = null
             try {
-                val useRealtime = engine != ENGINE_PARAFORMER
-                val useCorrection = engine != ENGINE_ZIPFORMER
                 var committedText = ""
                 if (useRealtime) {
                     online = getOnlineRecognizer()
                     stream = online.createStream()
                 }
-                if (useCorrection) getOfflineRecognizer()
+                if (useCorrection) getOfflineRecognizer(correctionId!!)
                 if (session.cancelled.get() || !session.running.get() || !isCurrent(session)) {
                     finish(session, "本次识别已取消", "", false)
                     return@Thread
@@ -530,7 +579,7 @@ object RecognitionController {
                     if (useRealtime) {
                         stream!!.acceptWaveform(samples, 16000)
                         while (online!!.isReady(stream)) online.decode(stream)
-                        val partial = RecognitionText.cleanRealtime(online.getResult(stream).text)
+                        val partial = RecognitionText.formatRealtime(online.getResult(stream).text)
                         val combined = RecognitionText.combineSegments(committedText, partial)
                         if (combined != session.text) {
                             session.text = combined
@@ -577,7 +626,7 @@ object RecognitionController {
                 if (useRealtime) {
                     stream!!.inputFinished()
                     while (online!!.isReady(stream)) online.decode(stream)
-                    val tail = RecognitionText.cleanRealtime(online.getResult(stream).text)
+                    val tail = RecognitionText.formatRealtime(online.getResult(stream).text)
                     realtime = RecognitionText.combineSegments(committedText, tail).ifBlank { session.text }
                     stream.release()
                     stream = null
@@ -593,7 +642,7 @@ object RecognitionController {
                     try {
                         var correctedText = ""
                         correctionSegments.forEachIndexed { index, segment ->
-                            val segmentText = runParaformer(segment)
+                            val segmentText = runOfflineCorrection(segment, correctionId!!)
                             correctedText = RecognitionText.combineSegments(correctedText, segmentText)
                             logger.info(
                                 "分段校正完成，片段=${index + 1}/${correctionSegments.size}，样本=${segment.size}，字符数=${segmentText.length}",
@@ -650,9 +699,9 @@ object RecognitionController {
         }, "本地语音识别-${session.id}").start()
     }
 
-    private fun runParaformer(samples: FloatArray): String {
+    private fun runOfflineCorrection(samples: FloatArray, resourceId: String): String {
         if (samples.isEmpty()) return ""
-        val offline = getOfflineRecognizer()
+        val offline = getOfflineRecognizer(resourceId)
         val stream = offline.createStream()
         return try {
             stream.acceptWaveform(samples, 16000)
