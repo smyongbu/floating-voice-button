@@ -3,8 +3,11 @@ package com.smyongbu.voiceinput
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.provider.Settings
 import android.view.View
 import kotlin.math.PI
@@ -14,8 +17,12 @@ import kotlin.math.pow
 import kotlin.math.sin
 
 class FloatingBallView(context: Context) : View(context) {
-    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(37, 99, 235)
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp(1.2f)
     }
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -34,6 +41,7 @@ class FloatingBallView(context: Context) : View(context) {
     private var targetLevel = 0.06f
     private var phase = 0f
     private var lastFrameNanos = 0L
+    private var opacityPercent = OverlayPreferences.DEFAULT_OPACITY
     private val motionEnabled = runCatching {
         Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
     }.getOrDefault(true)
@@ -72,6 +80,11 @@ class FloatingBallView(context: Context) : View(context) {
         invalidate()
     }
 
+    fun setOpacityPercent(percent: Int) {
+        opacityPercent = percent.coerceIn(35, 100)
+        invalidate()
+    }
+
     override fun onDetachedFromWindow() {
         removeCallbacks(animationFrame)
         lastFrameNanos = 0L
@@ -86,7 +99,43 @@ class FloatingBallView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val radius = minOf(width, height) / 2f
-        canvas.drawCircle(width / 2f, height / 2f, radius, backgroundPaint)
+        val centerX = width / 2f
+        val centerY = height / 2f
+        val alpha = (255f * opacityPercent / 100f).toInt()
+        glowPaint.shader = RadialGradient(
+            centerX,
+            centerY,
+            radius,
+            intArrayOf(Color.argb((alpha * 0.38f).toInt(), 56, 189, 248), Color.TRANSPARENT),
+            floatArrayOf(0.58f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(centerX, centerY, radius, glowPaint)
+        backgroundPaint.shader = LinearGradient(
+            0f,
+            0f,
+            width.toFloat(),
+            height.toFloat(),
+            intArrayOf(
+                Color.argb((alpha * 0.82f).toInt(), 255, 255, 255),
+                Color.argb(alpha, 37, 99, 235),
+                Color.argb((alpha * 0.9f).toInt(), 8, 145, 178)
+            ),
+            floatArrayOf(0f, 0.52f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(centerX, centerY, radius - dp(3f), backgroundPaint)
+        highlightPaint.shader = RadialGradient(
+            centerX - radius * 0.34f,
+            centerY - radius * 0.38f,
+            radius * 0.72f,
+            Color.argb((alpha * 0.48f).toInt(), 255, 255, 255),
+            Color.TRANSPARENT,
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(centerX, centerY, radius - dp(4f), highlightPaint)
+        borderPaint.color = Color.argb((alpha * 0.9f).toInt(), 191, 219, 254)
+        canvas.drawCircle(centerX, centerY, radius - dp(3.5f), borderPaint)
         if (active) drawWave(canvas) else drawMicrophone(canvas)
     }
 

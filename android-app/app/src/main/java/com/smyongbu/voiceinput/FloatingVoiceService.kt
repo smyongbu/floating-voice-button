@@ -6,6 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -24,6 +27,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 
 class FloatingVoiceService : Service(), RecognitionController.Listener {
     private data class SafeInsets(val left: Int, val top: Int, val right: Int, val bottom: Int)
@@ -31,6 +35,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     companion object {
         @Volatile var isRunning = false
         const val ACTION_STATE_CHANGED = "com.smyongbu.voiceinput.OVERLAY_STATE_CHANGED"
+        const val ACTION_APPEARANCE_CHANGED = "com.smyongbu.voiceinput.OVERLAY_APPEARANCE_CHANGED"
         private const val CHANNEL = "悬浮语音输入"
     }
 
@@ -46,6 +51,12 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     private var level = 0f
     private var manuallyHidden = false
     private var previousActive = false
+    private var lastText = ""
+    private val appearanceReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_APPEARANCE_CHANGED) applyAppearance()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -59,6 +70,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
             elevation = dp(10).toFloat()
             isLongClickable = true
         }
+        ball.setOpacityPercent(OverlayPreferences.opacity(this))
         captionText = TextView(this).apply {
             textSize = 15f
             setTextColor(Color.rgb(15, 23, 42))
@@ -109,6 +121,12 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
             return
         }
         applyCaptionVisibility(false)
+        ContextCompat.registerReceiver(
+            this,
+            appearanceReceiver,
+            IntentFilter(ACTION_APPEARANCE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         attachGestures()
         RecognitionController.addListener(this)
         logger.info("悬浮语音按钮已启动", "overlay-start")
@@ -231,11 +249,17 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     }
 
     private fun applyCaptionVisibility(show: Boolean) {
-        caption.visibility = if (show) View.VISIBLE else View.GONE
+        val visible = show && OverlayPreferences.textEnabled(this)
+        caption.visibility = if (visible) View.VISIBLE else View.GONE
         captionParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            (if (show) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            (if (visible) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
         safeUpdate(caption, captionParams)
-        if (show) moveCaption()
+        if (visible) moveCaption()
+    }
+
+    private fun applyAppearance() {
+        ball.setOpacityPercent(OverlayPreferences.opacity(this))
+        applyCaptionVisibility(!manuallyHidden && (RecognitionController.isListening() || lastText.isNotBlank()))
     }
 
     private fun safeUpdate(view: View, params: WindowManager.LayoutParams) {
@@ -254,6 +278,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
             if (active && !previousActive) manuallyHidden = false
             previousActive = active
             capturing = listening
+            lastText = text
             ball.update(capturing, level)
             captionText.text = text.ifBlank { status }
             applyCaptionVisibility(!manuallyHidden && (active || text.isNotBlank()))
@@ -304,6 +329,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        runCatching { unregisterReceiver(appearanceReceiver) }
         RecognitionController.removeListener(this)
         if (::ball.isInitialized) runCatching {
             if (ball.isAttachedToWindow) windowManager.removeView(ball)

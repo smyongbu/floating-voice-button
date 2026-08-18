@@ -16,7 +16,6 @@
       <section class="page is-active" data-page="recording" aria-labelledby="recordingTitle">
         <header class="page-header recording-header">
           <div>
-            <p id="privacyModeLabel" class="eyebrow">本地模式 · 中英双语</p>
             <h1 id="recordingTitle">开始说话</h1>
             <p class="page-intro">讲话时实时显示，停止后再校正完整句子。</p>
           </div>
@@ -25,6 +24,36 @@
             <span id="statusShort">准备中</span>
           </span>
         </header>
+
+        <button id="activeModelsButton" class="active-models-card" type="button" aria-label="查看当前识别模型">
+          <span class="active-models-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M7 7.5A3.5 3.5 0 1 1 10.5 11H7V7.5Z"></path><path d="M17 7.5A3.5 3.5 0 1 0 13.5 11H17V7.5Z"></path><path d="M7 16.5A3.5 3.5 0 1 0 10.5 13H7v3.5Z"></path><path d="M17 16.5A3.5 3.5 0 1 1 13.5 13H17v3.5Z"></path></svg>
+          </span>
+          <span class="active-models-copy">
+            <small>当前识别模型</small>
+            <strong id="activeModelsTitle">Zipformer ＋ Paraformer</strong>
+            <span id="activeModelsDetail">实时出字，并在停止后分段校正</span>
+          </span>
+          <svg class="active-models-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg>
+        </button>
+
+        <section class="transcript-card" aria-labelledby="transcriptTitle">
+          <div class="section-heading compact-heading">
+            <div>
+              <p class="section-kicker">识别结果</p>
+              <h2 id="transcriptTitle">本轮文字</h2>
+            </div>
+            <button id="copyTranscriptButton" class="icon-text-button" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="8" y="8" width="11" height="11" rx="2"></rect>
+                <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"></path>
+              </svg>
+              复制
+            </button>
+          </div>
+          <p id="transcriptText" class="transcript-text is-placeholder">识别文字会显示在这里</p>
+          <p id="recognitionAnnouncement" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
+        </section>
 
         <section class="voice-stage" aria-labelledby="statusText">
           <div class="wave-shell" id="waveShell" data-active="false">
@@ -67,36 +96,6 @@
           </div>
         </section>
 
-        <button id="activeModelsButton" class="active-models-card" type="button" aria-label="查看当前识别模型">
-          <span class="active-models-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M7 7.5A3.5 3.5 0 1 1 10.5 11H7V7.5Z"></path><path d="M17 7.5A3.5 3.5 0 1 0 13.5 11H17V7.5Z"></path><path d="M7 16.5A3.5 3.5 0 1 0 10.5 13H7v3.5Z"></path><path d="M17 16.5A3.5 3.5 0 1 1 13.5 13H17v3.5Z"></path></svg>
-          </span>
-          <span class="active-models-copy">
-            <small>当前识别模型</small>
-            <strong id="activeModelsTitle">Zipformer ＋ Paraformer</strong>
-            <span id="activeModelsDetail">实时出字，并在停止后分段校正</span>
-          </span>
-          <svg class="active-models-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg>
-        </button>
-
-        <section class="transcript-card" aria-labelledby="transcriptTitle">
-          <div class="section-heading compact-heading">
-            <div>
-              <p class="section-kicker">识别结果</p>
-              <h2 id="transcriptTitle">本轮文字</h2>
-            </div>
-            <button id="copyTranscriptButton" class="icon-text-button" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="8" y="8" width="11" height="11" rx="2"></rect>
-                <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"></path>
-              </svg>
-              复制
-            </button>
-          </div>
-          <p id="transcriptText" class="transcript-text is-placeholder">识别文字会显示在这里</p>
-          <p id="recognitionAnnouncement" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
-        </section>
-
         <button id="resourceNotice" class="resource-notice is-hidden" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"></path><path d="M5 19h14"></path></svg>
           <span>需要先下载离线模型，点此前往设置</span>
@@ -106,7 +105,6 @@
       <section class="page" data-page="history" aria-labelledby="historyTitle" hidden>
         <header class="page-header">
           <div>
-            <p class="eyebrow">只保存在这台手机</p>
             <h1 id="historyTitle">识别记录</h1>
             <p id="historyCount" class="page-intro">还没有记录</p>
           </div>
@@ -133,7 +131,6 @@
       <section class="page" data-page="settings" aria-labelledby="settingsTitle" hidden>
         <header class="page-header">
           <div>
-            <p class="eyebrow">识别方式与手机资源</p>
             <h1 id="settingsTitle">设置</h1>
             <p class="page-intro">选择适合中英混说的方案，并管理离线模型。</p>
           </div>
@@ -197,6 +194,34 @@
               <input id="overlaySwitch" type="checkbox">
               <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
             </label>
+          </div>
+        </section>
+
+        <section class="settings-section overlay-appearance" aria-labelledby="overlayAppearanceTitle">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">悬浮外观</p>
+              <h2 id="overlayAppearanceTitle">文字与透明度</h2>
+            </div>
+          </div>
+          <div class="setting-row setting-row-compact">
+            <div class="setting-copy">
+              <h3>显示识别文字框</h3>
+              <p>关闭后只显示悬浮球，识别结果仍会保存到记录。</p>
+            </div>
+            <label class="switch-control">
+              <span class="visually-hidden">显示悬浮识别文字框</span>
+              <input id="overlayTextSwitch" type="checkbox">
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+          <div class="range-setting">
+            <div class="range-heading">
+              <label for="overlayOpacity">悬浮球透明度</label>
+              <output id="overlayOpacityValue" for="overlayOpacity">72%</output>
+            </div>
+            <input id="overlayOpacity" type="range" min="35" max="100" step="1" value="72">
+            <p>透明度较低时更不遮挡内容，边缘光效仍会保留。</p>
           </div>
         </section>
 

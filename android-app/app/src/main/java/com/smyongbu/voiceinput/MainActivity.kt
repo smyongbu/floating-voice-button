@@ -266,6 +266,23 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         fun setOverlayEnabled(enabled: Boolean) = runOnUiThread { changeOverlay(enabled) }
 
         @JavascriptInterface
+        fun setOverlayTextEnabled(enabled: Boolean) = runOnUiThread {
+            OverlayPreferences.setTextEnabled(this@MainActivity, enabled)
+            notifyOverlayAppearanceChanged()
+            logger.info("悬浮文字框设置已更改，显示=$enabled", "settings-overlay-text")
+            emitSettings()
+        }
+
+        @JavascriptInterface
+        fun setOverlayOpacity(percent: Int) = runOnUiThread {
+            val value = percent.coerceIn(35, 100)
+            OverlayPreferences.setOpacity(this@MainActivity, value)
+            notifyOverlayAppearanceChanged()
+            logger.info("悬浮球透明度已更改，百分比=$value", "settings-overlay-opacity")
+            emitSettings()
+        }
+
+        @JavascriptInterface
         fun copyHistory(id: Long) {
             databaseExecutor.execute {
                 val item = historyStore.get(id)
@@ -374,6 +391,12 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         startForegroundService(Intent(this, FloatingVoiceService::class.java))
         logger.info("用户开启悬浮小球", "overlay")
         webView.postDelayed({ emitSettings() }, 250)
+    }
+
+    private fun notifyOverlayAppearanceChanged() {
+        sendBroadcast(
+            Intent(FloatingVoiceService.ACTION_APPEARANCE_CHANGED).setPackage(packageName)
+        )
     }
 
     override fun onRequestPermissionsResult(
@@ -499,6 +522,8 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
     private fun settingsJson() = JSONObject().apply {
         put("engine", RecognitionController.selectedEngine())
         put("overlayEnabled", FloatingVoiceService.isRunning)
+        put("overlayTextEnabled", OverlayPreferences.textEnabled(this@MainActivity))
+        put("overlayOpacity", OverlayPreferences.opacity(this@MainActivity))
         put("overlayPermission", Settings.canDrawOverlays(this@MainActivity))
         put(
             "microphonePermission",

@@ -14,6 +14,8 @@
     settings: {
       engine: "local_dual",
       overlayEnabled: false,
+      overlayTextEnabled: true,
+      overlayOpacity: 72,
       overlayPermission: false,
       microphonePermission: false
     },
@@ -29,7 +31,6 @@
   const elements = {
     pages: [...document.querySelectorAll(".page")],
     navItems: [...document.querySelectorAll(".nav-item")],
-    privacyModeLabel: document.getElementById("privacyModeLabel"),
     statusBadge: document.getElementById("statusBadge"),
     statusShort: document.getElementById("statusShort"),
     statusText: document.getElementById("statusText"),
@@ -55,6 +56,9 @@
     resourceAnnouncement: document.getElementById("resourceAnnouncement"),
     overlaySwitch: document.getElementById("overlaySwitch"),
     overlayStatus: document.getElementById("overlayStatus"),
+    overlayTextSwitch: document.getElementById("overlayTextSwitch"),
+    overlayOpacity: document.getElementById("overlayOpacity"),
+    overlayOpacityValue: document.getElementById("overlayOpacityValue"),
     devicePerformance: document.getElementById("devicePerformance"),
     copyDiagnosticsButton: document.getElementById("copyDiagnosticsButton"),
     versionText: document.getElementById("versionText"),
@@ -295,9 +299,6 @@
     const active = Boolean(recognition.active);
     const capturing = Boolean(recognition.capturing);
     const text = typeof recognition.text === "string" ? recognition.text : "";
-    elements.privacyModeLabel.textContent = state.settings.engine === "system"
-      ? "手机系统服务 · 可能联网"
-      : "本地模式 · 中英双语";
     elements.statusBadge.dataset.phase = phase;
     elements.statusShort.textContent = {
       preparing: "准备中",
@@ -348,28 +349,43 @@
   function createHistoryCard(item) {
     const card = document.createElement("article");
     card.className = "history-card";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", "复制这条识别记录");
     const text = document.createElement("p");
     text.className = "history-text";
     text.textContent = String(item.text || "");
     const meta = document.createElement("p");
     meta.className = "history-meta";
     meta.textContent = `${formatDate(item.createdAt)}　${engineName(item.engine)}`;
-    const actions = document.createElement("div");
-    actions.className = "history-actions";
-    const copy = actionButton("复制", () => callNative("copyHistory", Number(item.id)));
-    const remove = actionButton("删除", () => {
+    const copy = iconActionButton("复制", "copy", () => callNative("copyHistory", Number(item.id)));
+    copy.classList.add("history-copy");
+    const remove = iconActionButton("删除", "close", () => {
       openConfirm("删除这条识别记录？删除后无法恢复。", "确认删除", () => callNative("deleteHistory", Number(item.id)));
-    }, true);
-    actions.append(copy, remove);
-    card.append(text, meta, actions);
+    });
+    remove.classList.add("history-remove");
+    const copyCard = () => callNative("copyHistory", Number(item.id));
+    card.addEventListener("click", copyCard);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        copyCard();
+      }
+    });
+    [copy, remove].forEach((button) => button.addEventListener("click", (event) => event.stopPropagation()));
+    card.append(remove, text, meta, copy);
     return card;
   }
 
-  function actionButton(label, action, danger = false) {
+  function iconActionButton(label, icon, action) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `history-action${danger ? " is-danger" : ""}`;
-    button.textContent = label;
+    button.className = "history-icon-action";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.innerHTML = icon === "copy"
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"></path></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg>';
     button.addEventListener("click", action);
     return button;
   }
@@ -379,6 +395,10 @@
       input.checked = input.value === state.settings.engine;
     });
     elements.overlaySwitch.checked = Boolean(state.settings.overlayEnabled);
+    elements.overlayTextSwitch.checked = state.settings.overlayTextEnabled !== false;
+    const opacity = Math.min(100, Math.max(35, Number(state.settings.overlayOpacity) || 72));
+    elements.overlayOpacity.value = String(opacity);
+    elements.overlayOpacityValue.value = `${opacity}%`;
     elements.overlayStatus.textContent = state.settings.overlayEnabled
       ? "悬浮小球已开启；点击开始或停止识别，长按可关闭。"
       : state.settings.overlayPermission
@@ -638,6 +658,15 @@
     elements.overlaySwitch.disabled = true;
     callNative("setOverlayEnabled", enabled);
     window.setTimeout(() => { elements.overlaySwitch.disabled = false; }, 500);
+  });
+  elements.overlayTextSwitch.addEventListener("change", () => {
+    callNative("setOverlayTextEnabled", elements.overlayTextSwitch.checked);
+  });
+  elements.overlayOpacity.addEventListener("input", () => {
+    elements.overlayOpacityValue.value = `${elements.overlayOpacity.value}%`;
+  });
+  elements.overlayOpacity.addEventListener("change", () => {
+    callNative("setOverlayOpacity", Number(elements.overlayOpacity.value));
   });
   elements.copyDiagnosticsButton.addEventListener("click", () => callNative("copyDiagnostics"));
   elements.confirmCancel.addEventListener("click", closeConfirm);
