@@ -23,7 +23,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -49,8 +48,6 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     private val handler = Handler(Looper.getMainLooper())
     private var capturing = false
     private var level = 0f
-    private var manuallyHidden = false
-    private var previousActive = false
     private var lastText = ""
     private var ballSizeDp = OverlayPreferences.DEFAULT_SIZE
     private val appearanceReceiver = object : BroadcastReceiver() {
@@ -73,42 +70,36 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         }
         ball.setOpacityPercent(OverlayPreferences.opacity(this))
         captionText = TextView(this).apply {
-            textSize = 15f
+            textSize = 13f
             setTextColor(Color.rgb(15, 23, 42))
             maxLines = 3
-            setPadding(dp(12), dp(8), dp(8), dp(8))
-        }
-        val close = Button(this).apply {
-            text = "关闭"
-            isAllCaps = false
-            textSize = 12f
-            contentDescription = "关闭悬浮文字"
-            setTextColor(Color.rgb(71, 85, 105))
-            background = getDrawable(R.drawable.secondary_button)
-            setOnClickListener {
-                manuallyHidden = true
-                applyCaptionVisibility(false)
-            }
+            includeFontPadding = false
+            setPadding(dp(13), dp(11), dp(13), dp(11))
         }
         caption = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            elevation = dp(8).toFloat()
             background = GradientDrawable().apply {
-                cornerRadius = dp(12).toFloat()
-                setColor(Color.argb(246, 255, 255, 255))
-                setStroke(dp(1), Color.rgb(215, 224, 236))
+                cornerRadius = dp(14).toFloat()
+                setColor(Color.argb(250, 255, 255, 255))
+                setStroke(dp(1), Color.argb(230, 191, 219, 254))
             }
-            addView(captionText, LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 1f))
-            addView(close, LinearLayout.LayoutParams(dp(64), dp(48)).apply { marginEnd = dp(6) })
+            addView(
+                captionText,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
         }
         ballSizeDp = OverlayPreferences.size(this)
         ballParams = params(dp(ballSizeDp), dp(ballSizeDp), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE).apply {
             x = resources.displayMetrics.widthPixels - dp(78)
             y = resources.displayMetrics.heightPixels / 2
         }
-        val captionWidth = minOf(dp(330), resources.displayMetrics.widthPixels - dp(16)).coerceAtLeast(dp(220))
         captionParams = params(
-            captionWidth,
+            resolveCaptionWidth(),
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         )
@@ -208,14 +199,32 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
 
     private fun moveCaption() {
         val screenWidth = resources.displayMetrics.widthPixels
+        val screenHeight = resources.displayMetrics.heightPixels
         val safe = systemInsets()
         val minX = dp(8) + safe.left
         val maxX = (screenWidth - captionParams.width - dp(8) - safe.right).coerceAtLeast(minX)
-        captionParams.x = (ballParams.x - captionParams.width + dp(ballSizeDp)).coerceIn(
-            minX,
-            maxX
+        val gap = dp(10)
+        val left = ballParams.x - captionParams.width - gap
+        val right = ballParams.x + dp(ballSizeDp) + gap
+        caption.measure(
+            View.MeasureSpec.makeMeasureSpec(captionParams.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         )
-        captionParams.y = (ballParams.y - dp(94)).coerceAtLeast(dp(8) + safe.top)
+        val captionHeight = caption.measuredHeight.coerceAtLeast(dp(42))
+        val minY = dp(8) + safe.top
+        val maxY = (screenHeight - captionHeight - dp(8) - safe.bottom).coerceAtLeast(minY)
+        val canFitLeft = left >= minX
+        val canFitRight = right <= maxX
+        if (canFitLeft || canFitRight) {
+            captionParams.x = if (canFitLeft) left else right
+            captionParams.y = (ballParams.y + (dp(ballSizeDp) - captionHeight) / 2).coerceIn(minY, maxY)
+        } else {
+            captionParams.x = (ballParams.x + (dp(ballSizeDp) - captionParams.width) / 2)
+                .coerceIn(minX, maxX)
+            val above = ballParams.y - captionHeight - gap
+            val below = ballParams.y + dp(ballSizeDp) + gap
+            captionParams.y = if (above >= minY) above else below.coerceIn(minY, maxY)
+        }
         safeUpdate(caption, captionParams)
     }
 
@@ -243,8 +252,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         handler.post {
-            captionParams.width = minOf(dp(330), resources.displayMetrics.widthPixels - dp(16))
-                .coerceAtLeast(dp(220))
+            captionParams.width = resolveCaptionWidth()
             clampBallPosition()
             moveCaption()
         }
@@ -254,7 +262,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         val visible = show && OverlayPreferences.textEnabled(this)
         caption.visibility = if (visible) View.VISIBLE else View.GONE
         captionParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            (if (visible) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         safeUpdate(caption, captionParams)
         if (visible) moveCaption()
     }
@@ -266,10 +274,11 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
             ballSizeDp = nextSizeDp
             ballParams.width = dp(ballSizeDp)
             ballParams.height = dp(ballSizeDp)
+            captionParams.width = resolveCaptionWidth()
             clampBallPosition()
             moveCaption()
         }
-        applyCaptionVisibility(!manuallyHidden && (RecognitionController.isListening() || lastText.isNotBlank()))
+        applyCaptionVisibility(RecognitionController.isListening() || lastText.isNotBlank())
     }
 
     private fun safeUpdate(view: View, params: WindowManager.LayoutParams) {
@@ -285,14 +294,17 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     override fun onRecognitionState(listening: Boolean, status: String, text: String) {
         handler.post {
             val active = RecognitionController.isListening()
-            if (active && !previousActive) manuallyHidden = false
-            previousActive = active
             capturing = listening
             lastText = text
             ball.update(capturing, level)
             captionText.text = text.ifBlank { status }
-            applyCaptionVisibility(!manuallyHidden && (active || text.isNotBlank()))
+            applyCaptionVisibility(active || text.isNotBlank())
         }
+    }
+
+    private fun resolveCaptionWidth(): Int {
+        val available = resources.displayMetrics.widthPixels - dp(ballSizeDp) - dp(36)
+        return minOf(dp(220), available).coerceAtLeast(dp(180))
     }
 
     override fun onAudioLevel(level: Float) {

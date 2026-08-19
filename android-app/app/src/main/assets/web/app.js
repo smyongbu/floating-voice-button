@@ -33,7 +33,6 @@
     pages: [...document.querySelectorAll(".page")],
     navItems: [...document.querySelectorAll(".nav-item")],
     statusText: document.getElementById("statusText"),
-    statusHint: document.getElementById("statusHint"),
     recordButton: document.getElementById("recordButton"),
     recordButtonText: document.getElementById("recordButtonText"),
     cancelButton: document.getElementById("cancelButton"),
@@ -46,6 +45,7 @@
     activeModelsDetail: document.getElementById("activeModelsDetail"),
     historyCount: document.getElementById("historyCount"),
     historySearch: document.getElementById("historySearch"),
+    copyAllHistoryButton: document.getElementById("copyAllHistoryButton"),
     historyEmpty: document.getElementById("historyEmpty"),
     historyList: document.getElementById("historyList"),
     loadMoreHistory: document.getElementById("loadMoreHistory"),
@@ -210,8 +210,10 @@
   class CompactWaveform {
     constructor() {
       this.active = false;
-      this.target = 0;
-      this.level = 0;
+      this.target = 0.08;
+      this.level = 0.08;
+      this.targetSpeed = 0.012;
+      this.speed = 0.012;
       this.phase = 0;
       this.frame = 0;
       this.lastTime = 0;
@@ -224,19 +226,15 @@
     setActive(active) {
       this.active = active;
       elements.overlayWaveform.dataset.active = String(active);
-      if (!active) {
-        this.target = 0;
-        this.level = 0;
-        if (this.frame) cancelAnimationFrame(this.frame);
-        this.frame = 0;
-        this.render();
-        this.updateMotionState();
-        return;
-      }
+      this.target = active ? 0.42 : 0.08;
+      this.level = active ? 0.42 : 0.08;
+      this.targetSpeed = active ? 0.065 : 0.012;
+      this.speed = active ? 0.065 : 0.012;
+      this.lastLevelAt = active ? performance.now() : 0;
       if (reducedMotion.matches || !this.isVisible()) {
         if (this.frame) cancelAnimationFrame(this.frame);
         this.frame = 0;
-        this.level = active ? 0.42 : 0;
+        this.level = active ? 0.42 : 0.08;
         this.render();
         this.updateMotionState();
         return;
@@ -246,9 +244,14 @@
 
     setLevel(raw) {
       const normalized = Math.max(0, Math.min(1, Number(raw) || 0));
-      this.target = this.active ? Math.min(1, Math.sqrt(normalized) * 0.86 + 0.06) : 0;
-      this.lastLevelAt = performance.now();
-      if (!this.active || reducedMotion.matches || !this.isVisible()) return;
+      if (!this.active) return;
+      const now = performance.now();
+      const voice = Math.pow(normalized, 0.65);
+      const brightness = 0.5 + Math.sin(now * 0.0037) * 0.18;
+      this.target = 0.1 + 0.78 * voice;
+      this.targetSpeed = 0.045 + 0.055 * voice + 0.035 * brightness * voice;
+      this.lastLevelAt = now;
+      if (reducedMotion.matches || !this.isVisible()) return;
       this.start();
     }
 
@@ -261,7 +264,7 @@
     }
 
     refreshVisibility() {
-      if (this.active && this.isVisible() && !reducedMotion.matches) {
+      if (this.isVisible() && !reducedMotion.matches) {
         this.start();
       } else {
         if (this.frame) cancelAnimationFrame(this.frame);
@@ -272,11 +275,19 @@
     }
 
     refreshMotionPreference() {
-      this.setActive(this.active);
+      if (reducedMotion.matches) {
+        if (this.frame) cancelAnimationFrame(this.frame);
+        this.frame = 0;
+        this.level = this.active ? 0.42 : 0.08;
+        this.render();
+        this.updateMotionState();
+        return;
+      }
+      this.refreshVisibility();
     }
 
     start() {
-      if (this.frame || !this.active || !this.isVisible() || reducedMotion.matches) {
+      if (this.frame || !this.isVisible() || reducedMotion.matches) {
         this.updateMotionState();
         return;
       }
@@ -286,25 +297,39 @@
     }
 
     tick(time) {
-      if (!this.active || !this.isVisible() || reducedMotion.matches) {
+      if (!this.isVisible() || reducedMotion.matches) {
         this.frame = 0;
         this.updateMotionState();
         return;
       }
       const delta = Math.min(40, Math.max(0, time - this.lastTime));
       this.lastTime = time;
-      if (time - this.lastLevelAt > 420) {
-        const syntheticLevel = 0.48 + Math.sin(time * 0.0041) * 0.18 + Math.sin(time * 0.0067 + 1.2) * 0.12;
-        this.target = Math.max(0.18, Math.min(0.82, syntheticLevel));
+      if (this.active) {
+        if (time - this.lastLevelAt > 420) {
+          const voice = Math.max(0, Math.min(1, 0.5 + Math.sin(time * 0.0058) * 0.28 + Math.sin(time * 0.0091 + 1.2) * 0.18));
+          const brightness = 0.5 + Math.sin(time * 0.0037 + 0.8) * 0.18;
+          this.target = 0.1 + 0.78 * voice;
+          this.targetSpeed = 0.045 + 0.055 * voice + 0.035 * brightness * voice;
+        }
+        const elapsedSeconds = delta / 1000;
+        const timeConstant = this.target > this.level ? 0.045 : 0.22;
+        const smoothing = 1 - Math.exp(-elapsedSeconds / timeConstant);
+        const speedSmoothing = 1 - Math.exp(-elapsedSeconds / 0.14);
+        this.level += (this.target - this.level) * smoothing;
+        this.speed += (this.targetSpeed - this.speed) * speedSmoothing;
+      } else {
+        this.target = 0.08;
+        this.level = 0.08;
+        this.targetSpeed = 0.012;
+        this.speed = 0.012;
       }
-      this.level += (this.target - this.level) * 0.14;
-      this.phase += delta * (0.0019 + this.level * 0.00125);
+      this.phase += delta * (0.0022 + this.speed * 0.0255);
       this.render();
       this.frame = requestAnimationFrame((next) => this.tick(next));
     }
 
     render() {
-      const amplitude = this.active ? 2.4 + this.level * 14 : 0.72;
+      const amplitude = 2 + this.level * 18.5;
       elements.overlayWaveBack.setAttribute("d", buildSmoothWavePath(120, 36, amplitude * 0.43, 2.9, -this.phase * 0.82, 36));
       elements.overlayWaveMiddle.setAttribute("d", buildSmoothWavePath(120, 36, amplitude * 0.68, 1.82, this.phase * 0.64 + 0.7, 36));
       elements.overlayWaveFront.setAttribute("d", buildSmoothWavePath(120, 36, amplitude, 2.25, this.phase, 36));
@@ -393,7 +418,7 @@
       return undefined;
     }
     if (method === "clearHistory") { state.history = []; renderHistory(); return undefined; }
-    if (method === "copyText" || method === "copyHistory" || method === "copyDiagnostics") { showToast("预览：已模拟复制"); return undefined; }
+    if (method === "copyText" || method === "copyHistory" || method === "copyAllHistory" || method === "copyDiagnostics") { showToast("预览：已模拟复制"); return undefined; }
     if (method === "setOverlayEnabled") { state.settings.overlayEnabled = Boolean(args[0]); state.settings.overlayPermission = true; renderSettings(); return undefined; }
     if (method === "setOverlayTextEnabled") { state.settings.overlayTextEnabled = Boolean(args[0]); renderSettings(); return undefined; }
     if (method === "setOverlayOpacity") { state.settings.overlayOpacity = Number(args[0]); renderSettings(); return undefined; }
@@ -460,10 +485,18 @@
         waveform.setLevel(event.level);
         overlayWaveform.setLevel(event.level);
         break;
-      case "history":
+      case "history": {
+        const previousNewest = newestHistoryKey(state.history);
+        const previousCount = state.history.length;
         state.history = Array.isArray(event.history) ? event.history : [];
-        renderHistory();
+        const hasNewRecord = state.history.length >= previousCount
+          && newestHistoryKey(state.history) !== previousNewest;
+        renderHistory({
+          scrollToLatest: state.page === "history" && hasNewRecord,
+          preserveScroll: state.page === "history" && !hasNewRecord,
+        });
         break;
+      }
       case "settings":
         state.settings = event.settings || state.settings;
         renderSettings();
@@ -499,12 +532,6 @@
     const capturing = Boolean(recognition.capturing);
     const text = typeof recognition.text === "string" ? recognition.text : "";
     elements.statusText.textContent = recognition.status || "准备就绪";
-    elements.statusHint.textContent = {
-      preparing: "模型和麦克风准备完成前，请先不要说话",
-      listening: "",
-      processing: "正在生成最终文字，请稍候",
-      idle: active ? "正在准备本轮识别" : ""
-    }[phase] || "";
     elements.recordButton.dataset.active = String(active);
     elements.recordButton.disabled = active && phase === "processing";
     elements.recordButtonText.textContent = active ? (phase === "processing" ? "正在整理文字" : "停止识别") : "开始识别";
@@ -528,23 +555,46 @@
     elements.activeModelsDetail.textContent = modelCopy[1];
   }
 
-  function renderHistory() {
+  function renderHistory({ scrollToLatest = false, preserveScroll = false } = {}) {
+    const previousHeight = preserveScroll ? document.documentElement.scrollHeight : 0;
+    const previousTop = preserveScroll ? window.scrollY : 0;
     const query = state.historyQuery.trim().toLocaleLowerCase("zh-CN");
-    const filtered = state.history.filter((item) => String(item.text || "").toLocaleLowerCase("zh-CN").includes(query));
+    const filtered = state.history
+      .filter((item) => String(item.text || "").toLocaleLowerCase("zh-CN").includes(query))
+      .sort((left, right) => historySortValue(right) - historySortValue(left));
     const visible = filtered.slice(0, state.historyVisibleCount).reverse();
     elements.historyCount.textContent = `${state.history.length} 条记录`;
     elements.clearHistoryButton.disabled = state.history.length === 0;
+    elements.copyAllHistoryButton.disabled = state.history.length === 0;
     elements.historyEmpty.classList.toggle("is-hidden", filtered.length > 0);
     elements.historyList.replaceChildren(...visible.map(createHistoryCard));
     elements.loadMoreHistory.classList.toggle("is-hidden", visible.length >= filtered.length);
+    if (scrollToLatest && state.page === "history") scrollHistoryToLatest();
+    else if (preserveScroll && state.page === "history") {
+      window.requestAnimationFrame(() => {
+        const addedHeight = document.documentElement.scrollHeight - previousHeight;
+        window.scrollTo({ top: Math.max(0, previousTop + addedHeight), behavior: "auto" });
+      });
+    }
+  }
+
+  function historySortValue(item) {
+    const timestamp = Date.parse(String(item?.createdAt || "").replace(" ", "T"));
+    return Number.isFinite(timestamp) ? timestamp : Number(item?.id) || 0;
+  }
+
+  function newestHistoryKey(items) {
+    const newest = [...items].sort((left, right) => historySortValue(right) - historySortValue(left))[0];
+    return newest ? `${historySortValue(newest)}:${newest.id}` : "";
+  }
+
+  function scrollHistoryToLatest() {
+    window.requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" }));
   }
 
   function createHistoryCard(item) {
     const card = document.createElement("article");
     card.className = "history-card";
-    card.tabIndex = 0;
-    card.setAttribute("role", "button");
-    card.setAttribute("aria-label", "复制这条识别记录");
     const text = document.createElement("p");
     text.className = "history-text";
     text.textContent = String(item.text || "");
@@ -562,12 +612,6 @@
     remove.classList.add("history-remove");
     const copyCard = () => callNative("copyHistory", Number(item.id));
     card.addEventListener("click", copyCard);
-    card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        copyCard();
-      }
-    });
     [copy, remove].forEach((button) => button.addEventListener("click", (event) => event.stopPropagation()));
     card.append(remove, text, footer);
     return card;
@@ -740,7 +784,8 @@
       if (active) {
         section.setAttribute("tabindex", "-1");
         section.focus({ preventScroll: true });
-        window.scrollTo(0, 0);
+        if (page === "history") scrollHistoryToLatest();
+        else window.scrollTo(0, 0);
       }
     });
     elements.navItems.forEach((item) => {
@@ -862,9 +907,12 @@
     state.historyVisibleCount = 40;
     renderHistory();
   });
+  elements.copyAllHistoryButton.addEventListener("click", () => {
+    if (state.history.length) callNative("copyAllHistory");
+  });
   elements.loadMoreHistory.addEventListener("click", () => {
     state.historyVisibleCount += 40;
-    renderHistory();
+    renderHistory({ preserveScroll: true });
   });
   elements.clearHistoryButton.addEventListener("click", () => {
     if (!state.history.length) return;

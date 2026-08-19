@@ -303,6 +303,20 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         }
 
         @JavascriptInterface
+        fun copyAllHistory() {
+            databaseExecutor.execute {
+                val items = historyStore.list(500).asReversed()
+                val text = items.joinToString("\n\n") { it.text.trim() }.trim()
+                runOnUiThread {
+                    copyToClipboard(text, "全部识别记录", "全部记录已复制。")
+                    if (text.isNotBlank()) {
+                        logger.info("已复制全部识别历史，数量=${items.size}", "history-copy-all")
+                    }
+                }
+            }
+        }
+
+        @JavascriptInterface
         fun deleteHistory(id: Long) {
             databaseExecutor.execute {
                 historyStore.delete(id)
