@@ -16,14 +16,15 @@
       overlayEnabled: false,
       overlayTextEnabled: true,
       overlayOpacity: 72,
+      overlaySize: 64,
       overlayPermission: false,
       microphonePermission: false
     },
     resources: [],
     history: [],
-    device: { memoryGb: 0, assessment: "正在读取手机内存信息…" },
     version: "",
     page: "recording",
+    engineMode: null,
     historyQuery: "",
     historyVisibleCount: 40
   };
@@ -31,8 +32,6 @@
   const elements = {
     pages: [...document.querySelectorAll(".page")],
     navItems: [...document.querySelectorAll(".nav-item")],
-    statusBadge: document.getElementById("statusBadge"),
-    statusShort: document.getElementById("statusShort"),
     statusText: document.getElementById("statusText"),
     statusHint: document.getElementById("statusHint"),
     recordButton: document.getElementById("recordButton"),
@@ -52,6 +51,8 @@
     loadMoreHistory: document.getElementById("loadMoreHistory"),
     clearHistoryButton: document.getElementById("clearHistoryButton"),
     engineInputs: [...document.querySelectorAll('input[name="engine"]')],
+    engineModeButtons: [...document.querySelectorAll(".engine-mode-switch [data-engine-mode]")],
+    engineCards: [...document.querySelectorAll(".engine-card[data-engine-mode]")],
     resourceList: document.getElementById("resourceList"),
     resourceAnnouncement: document.getElementById("resourceAnnouncement"),
     overlaySwitch: document.getElementById("overlaySwitch"),
@@ -59,7 +60,15 @@
     overlayTextSwitch: document.getElementById("overlayTextSwitch"),
     overlayOpacity: document.getElementById("overlayOpacity"),
     overlayOpacityValue: document.getElementById("overlayOpacityValue"),
-    devicePerformance: document.getElementById("devicePerformance"),
+    overlaySize: document.getElementById("overlaySize"),
+    overlaySizeValue: document.getElementById("overlaySizeValue"),
+    overlayPreview: document.getElementById("overlayPreview"),
+    overlayPreviewText: document.getElementById("overlayPreviewText"),
+    overlayPreviewOrb: document.getElementById("overlayPreviewOrb"),
+    overlayWaveform: document.getElementById("overlayWaveform"),
+    overlayWaveFront: document.getElementById("overlayWaveFront"),
+    overlayWaveMiddle: document.getElementById("overlayWaveMiddle"),
+    overlayWaveBack: document.getElementById("overlayWaveBack"),
     copyDiagnosticsButton: document.getElementById("copyDiagnosticsButton"),
     versionText: document.getElementById("versionText"),
     confirmDialog: document.getElementById("confirmDialog"),
@@ -77,7 +86,34 @@
   let confirmReturnFocus = null;
   let toastTimer = 0;
   let previousRecognitionActive = false;
+  let previewRecordingTimer = 0;
+  let previewLevelTimer = 0;
+  let overlayPreviewRecording = false;
   const resourceCards = new Map();
+
+  function buildSmoothWavePath(width, centerY, amplitude, cycles, phase, count = 48) {
+    const points = [];
+    for (let index = 0; index <= count; index += 1) {
+      const ratio = index / count;
+      const envelope = Math.pow(Math.sin(Math.PI * ratio), 1.65);
+      const harmonic = Math.sin(ratio * Math.PI * 2 * cycles + phase);
+      const detail = Math.sin(ratio * Math.PI * 2 * (cycles * 1.9) - phase * 0.6) * 0.17;
+      points.push({
+        x: ratio * width,
+        y: centerY + (harmonic + detail) * amplitude * envelope
+      });
+    }
+    let path = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const current = points[index];
+      const next = points[index + 1];
+      const midX = (current.x + next.x) / 2;
+      const midY = (current.y + next.y) / 2;
+      path += ` Q${current.x.toFixed(1)} ${current.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`;
+    }
+    const last = points[points.length - 1];
+    return `${path} L${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+  }
 
   class SmoothWaveform {
     constructor() {
@@ -167,37 +203,120 @@
     }
 
     path(amplitude, cycles, phase) {
-      const points = [];
-      const count = 48;
-      for (let index = 0; index <= count; index += 1) {
-        const ratio = index / count;
-        const envelope = Math.pow(Math.sin(Math.PI * ratio), 1.65);
-        const harmonic = Math.sin(ratio * Math.PI * 2 * cycles + phase);
-        const detail = Math.sin(ratio * Math.PI * 2 * (cycles * 1.9) - phase * 0.6) * 0.17;
-        points.push({
-          x: ratio * 360,
-          y: 56 + (harmonic + detail) * amplitude * envelope
-        });
+      return buildSmoothWavePath(360, 56, amplitude, cycles, phase);
+    }
+  }
+
+  class CompactWaveform {
+    constructor() {
+      this.active = false;
+      this.target = 0;
+      this.level = 0;
+      this.phase = 0;
+      this.frame = 0;
+      this.lastTime = 0;
+      this.lastLevelAt = 0;
+      elements.overlayWaveform.dataset.active = "false";
+      elements.overlayWaveform.dataset.motion = "paused";
+      this.render();
+    }
+
+    setActive(active) {
+      this.active = active;
+      elements.overlayWaveform.dataset.active = String(active);
+      if (!active) {
+        this.target = 0;
+        this.level = 0;
+        if (this.frame) cancelAnimationFrame(this.frame);
+        this.frame = 0;
+        this.render();
+        this.updateMotionState();
+        return;
       }
-      let path = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
-      for (let index = 1; index < points.length - 1; index += 1) {
-        const current = points[index];
-        const next = points[index + 1];
-        const midX = (current.x + next.x) / 2;
-        const midY = (current.y + next.y) / 2;
-        path += ` Q${current.x.toFixed(1)} ${current.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`;
+      if (reducedMotion.matches || !this.isVisible()) {
+        if (this.frame) cancelAnimationFrame(this.frame);
+        this.frame = 0;
+        this.level = active ? 0.42 : 0;
+        this.render();
+        this.updateMotionState();
+        return;
       }
-      const last = points[points.length - 1];
-      return `${path} L${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+      this.start();
+    }
+
+    setLevel(raw) {
+      const normalized = Math.max(0, Math.min(1, Number(raw) || 0));
+      this.target = this.active ? Math.min(1, Math.sqrt(normalized) * 0.86 + 0.06) : 0;
+      this.lastLevelAt = performance.now();
+      if (!this.active || reducedMotion.matches || !this.isVisible()) return;
+      this.start();
+    }
+
+    isVisible() {
+      return state.page === "settings" && !document.hidden;
+    }
+
+    updateMotionState() {
+      elements.overlayWaveform.dataset.motion = this.frame ? "running" : "paused";
+    }
+
+    refreshVisibility() {
+      if (this.active && this.isVisible() && !reducedMotion.matches) {
+        this.start();
+      } else {
+        if (this.frame) cancelAnimationFrame(this.frame);
+        this.frame = 0;
+        this.render();
+        this.updateMotionState();
+      }
+    }
+
+    refreshMotionPreference() {
+      this.setActive(this.active);
+    }
+
+    start() {
+      if (this.frame || !this.active || !this.isVisible() || reducedMotion.matches) {
+        this.updateMotionState();
+        return;
+      }
+      this.lastTime = performance.now();
+      this.frame = requestAnimationFrame((time) => this.tick(time));
+      this.updateMotionState();
+    }
+
+    tick(time) {
+      if (!this.active || !this.isVisible() || reducedMotion.matches) {
+        this.frame = 0;
+        this.updateMotionState();
+        return;
+      }
+      const delta = Math.min(40, Math.max(0, time - this.lastTime));
+      this.lastTime = time;
+      if (time - this.lastLevelAt > 420) {
+        const syntheticLevel = 0.48 + Math.sin(time * 0.0041) * 0.18 + Math.sin(time * 0.0067 + 1.2) * 0.12;
+        this.target = Math.max(0.18, Math.min(0.82, syntheticLevel));
+      }
+      this.level += (this.target - this.level) * 0.14;
+      this.phase += delta * (0.0019 + this.level * 0.00125);
+      this.render();
+      this.frame = requestAnimationFrame((next) => this.tick(next));
+    }
+
+    render() {
+      const amplitude = this.active ? 2.4 + this.level * 14 : 0.72;
+      elements.overlayWaveBack.setAttribute("d", buildSmoothWavePath(120, 36, amplitude * 0.43, 2.9, -this.phase * 0.82, 36));
+      elements.overlayWaveMiddle.setAttribute("d", buildSmoothWavePath(120, 36, amplitude * 0.68, 1.82, this.phase * 0.64 + 0.7, 36));
+      elements.overlayWaveFront.setAttribute("d", buildSmoothWavePath(120, 36, amplitude, 2.25, this.phase, 36));
     }
   }
 
   const waveform = new SmoothWaveform();
+  const overlayWaveform = new CompactWaveform();
 
   function callNative(method, ...args) {
     if (!native || typeof native[method] !== "function") {
-      if (!["setCurrentPage", "ready"].includes(method)) showToast("当前是界面预览，原生功能不可用。")
-      return undefined;
+      return runPreviewAction(method, args);
     }
     try {
       return native[method](...args);
@@ -205,6 +324,82 @@
       showToast("操作没有完成，请重试。")
       return undefined;
     }
+  }
+
+  function runPreviewAction(method, args) {
+    const resourceById = (id) => state.resources.find((item) => item.id === id);
+    if (["ready", "setCurrentPage"].includes(method)) return undefined;
+    if (method === "setEngine") {
+      state.settings.engine = String(args[0] || "local_dual");
+      renderSettings();
+      renderRecognition();
+      showToast("预览：识别方案已切换");
+      return undefined;
+    }
+    if (method === "toggleRecognition") {
+      if (state.recognition.active) {
+        window.clearTimeout(previewRecordingTimer);
+        window.clearInterval(previewLevelTimer);
+        state.recognition = { active: true, capturing: false, phase: "processing", status: "正在使用所选模型校正文字…", text: state.recognition.text };
+        renderRecognition();
+        previewRecordingTimer = window.setTimeout(() => {
+          state.recognition = { active: false, capturing: false, phase: "idle", status: "识别完成", text: "你好，这是独立网页预览生成的中英文 mixed speech 示例。" };
+          state.history.unshift({ id: Date.now(), text: state.recognition.text, createdAt: new Date().toISOString().replace("T", " ").slice(0, 19), engine: state.settings.engine });
+          renderAll();
+        }, 1100);
+      } else {
+        state.recognition = { active: true, capturing: false, phase: "preparing", status: "正在准备本地模型…", text: "" };
+        renderRecognition();
+        previewRecordingTimer = window.setTimeout(() => {
+          state.recognition = { active: true, capturing: true, phase: "listening", status: "正在本地实时识别…", text: "你好，这是独立网页预览" };
+          renderRecognition();
+          previewLevelTimer = window.setInterval(() => waveform.setLevel(0.12 + Math.random() * 0.75), 110);
+        }, 650);
+      }
+      return undefined;
+    }
+    if (method === "cancelRecognition") {
+      window.clearTimeout(previewRecordingTimer);
+      window.clearInterval(previewLevelTimer);
+      state.recognition = { active: false, capturing: false, phase: "idle", status: "本次识别已取消", text: "" };
+      renderRecognition();
+      return undefined;
+    }
+    if (method === "downloadResource") {
+      const resource = resourceById(String(args[0]));
+      if (!resource) return undefined;
+      resource.status = "downloading";
+      resource.presentBytes = Math.max(resource.presentBytes, Math.round(resource.totalBytes * 0.36));
+      resource.speedBytesPerSecond = 5242880;
+      resource.etaSeconds = Math.round((resource.totalBytes - resource.presentBytes) / resource.speedBytesPerSecond);
+      renderResources();
+      showToast("预览：已模拟开始下载");
+      return undefined;
+    }
+    if (method === "pauseResource") {
+      const resource = resourceById(String(args[0]));
+      if (resource) { resource.status = "paused"; resource.speedBytesPerSecond = 0; renderResources(); }
+      return undefined;
+    }
+    if (method === "verifyResource") { showToast("预览：模型校验通过"); return undefined; }
+    if (method === "deleteResource") {
+      const resource = resourceById(String(args[0]));
+      if (resource) { resource.status = "missing"; resource.presentBytes = 0; resource.installedBytes = 0; renderResources(); renderRecognition(); }
+      return undefined;
+    }
+    if (method === "deleteHistory") {
+      state.history = state.history.filter((item) => Number(item.id) !== Number(args[0]));
+      renderHistory();
+      return undefined;
+    }
+    if (method === "clearHistory") { state.history = []; renderHistory(); return undefined; }
+    if (method === "copyText" || method === "copyHistory" || method === "copyDiagnostics") { showToast("预览：已模拟复制"); return undefined; }
+    if (method === "setOverlayEnabled") { state.settings.overlayEnabled = Boolean(args[0]); state.settings.overlayPermission = true; renderSettings(); return undefined; }
+    if (method === "setOverlayTextEnabled") { state.settings.overlayTextEnabled = Boolean(args[0]); renderSettings(); return undefined; }
+    if (method === "setOverlayOpacity") { state.settings.overlayOpacity = Number(args[0]); renderSettings(); return undefined; }
+    if (method === "setOverlaySize") { state.settings.overlaySize = Number(args[0]); renderSettings(); return undefined; }
+    showToast("当前操作仅在正式 App 中生效");
+    return undefined;
   }
 
   function loadInitialState() {
@@ -216,16 +411,19 @@
       }
     }
     return {
-      recognition: state.recognition,
+      recognition: { active: false, capturing: false, phase: "idle", status: "双语实时与整段校正模型已就绪", text: "" },
       settings: state.settings,
       resources: [
-        { id: "zipformer-bilingual", name: "中英双语实时模型", purpose: "边说边显示中文、英文和中英混说结果", version: "2024-03-20-exp32-int8", totalBytes: 60142871, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 0, errorMessage: "" },
-        { id: "paraformer", name: "中英双语整段校正模型", purpose: "停止后重新校正完整句子，改善长句连贯度", version: "2024-03-09-small-int8", totalBytes: 81904027, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 0, errorMessage: "" },
+        { id: "zipformer-bilingual", name: "Zipformer｜中英双语实时模型", purpose: "边说边显示中文、英文和中英混说结果", version: "2024-03-20-exp32-int8", totalBytes: 60142871, presentBytes: 60142871, installedBytes: 60142871, status: "available", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
+        { id: "paraformer", name: "Paraformer｜中英双语整段校正模型", purpose: "停止后重新校正完整句子，改善长句连贯度", version: "2024-03-09-small-int8", totalBytes: 81904027, presentBytes: 81904027, installedBytes: 81904027, status: "available", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
         { id: "qwen3-asr-0.6b-int8", name: "Qwen3-ASR 0.6B INT8 高质量校正模型", purpose: "停止后高质量校正中英文和中英混说；下载较大、处理较慢", version: "2026-03-25-int8", totalBytes: 987015347, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 0, errorMessage: "" }
       ],
-      history: [],
-      device: { memoryGb: 12, assessment: "适合使用推荐的双模型方案" },
-      version: "0.8.0"
+      history: [
+        { id: 3, text: "你好，今天测试一下中文和 English 混合识别。", createdAt: "2026-08-18 18:42:00", engine: "local_dual" },
+        { id: 2, text: "Please create a new note and copy this sentence.", createdAt: "2026-08-18 17:16:00", engine: "local_dual_qwen" },
+        { id: 1, text: "这是一条较长的模拟历史记录，用于检查卡片换行、复制按钮和删除按钮在窄屏幕上的排版。", createdAt: "2026-08-18 16:03:00", engine: "local_zipformer" }
+      ],
+      version: "独立 UI 预览"
     };
   }
 
@@ -235,7 +433,6 @@
     if (next.settings) state.settings = next.settings;
     if (Array.isArray(next.resources)) state.resources = next.resources;
     if (Array.isArray(next.history)) state.history = next.history;
-    if (next.device) state.device = next.device;
     if (typeof next.version === "string") state.version = next.version;
     renderAll();
     if (["recording", "history", "settings"].includes(next.page) && next.page !== state.page) {
@@ -261,6 +458,7 @@
         break;
       case "audioLevel":
         waveform.setLevel(event.level);
+        overlayWaveform.setLevel(event.level);
         break;
       case "history":
         state.history = Array.isArray(event.history) ? event.history : [];
@@ -300,20 +498,13 @@
     const active = Boolean(recognition.active);
     const capturing = Boolean(recognition.capturing);
     const text = typeof recognition.text === "string" ? recognition.text : "";
-    elements.statusBadge.dataset.phase = phase;
-    elements.statusShort.textContent = {
-      preparing: "准备中",
-      listening: "识别中",
-      processing: "整理中",
-      idle: "待机"
-    }[phase] || "待机";
     elements.statusText.textContent = recognition.status || "准备就绪";
     elements.statusHint.textContent = {
       preparing: "模型和麦克风准备完成前，请先不要说话",
-      listening: "现在可以说话，停顿后会提交已识别片段",
+      listening: "",
       processing: "正在生成最终文字，请稍候",
-      idle: active ? "正在准备本轮识别" : "点击下方按钮开始识别"
-    }[phase] || "点击下方按钮开始识别";
+      idle: active ? "正在准备本轮识别" : ""
+    }[phase] || "";
     elements.recordButton.dataset.active = String(active);
     elements.recordButton.disabled = active && phase === "processing";
     elements.recordButtonText.textContent = active ? (phase === "processing" ? "正在整理文字" : "停止识别") : "开始识别";
@@ -331,8 +522,7 @@
       local_dual_qwen: ["Zipformer ＋ Qwen3-ASR", "2 套模型 · 实时出字，停止后高质量校正"],
       local_zipformer: ["仅 Zipformer", "1 套模型 · 只做实时识别"],
       local_paraformer: ["仅 Paraformer", "1 套模型 · 停止后生成全文"],
-      local_qwen: ["仅 Qwen3-ASR", "1 套模型 · 停止后高质量生成全文"],
-      system: ["手机系统识别", "不使用本地模型 · 可能联网"]
+      local_qwen: ["仅 Qwen3-ASR", "1 套模型 · 停止后高质量生成全文"]
     }[state.settings.engine] || ["正在读取模型", "请稍候"];
     elements.activeModelsTitle.textContent = modelCopy[0];
     elements.activeModelsDetail.textContent = modelCopy[1];
@@ -341,7 +531,7 @@
   function renderHistory() {
     const query = state.historyQuery.trim().toLocaleLowerCase("zh-CN");
     const filtered = state.history.filter((item) => String(item.text || "").toLocaleLowerCase("zh-CN").includes(query));
-    const visible = filtered.slice(0, state.historyVisibleCount);
+    const visible = filtered.slice(0, state.historyVisibleCount).reverse();
     elements.historyCount.textContent = `${state.history.length} 条记录`;
     elements.clearHistoryButton.disabled = state.history.length === 0;
     elements.historyEmpty.classList.toggle("is-hidden", filtered.length > 0);
@@ -363,6 +553,9 @@
     meta.textContent = `${formatDate(item.createdAt)}　${engineName(item.engine)}`;
     const copy = iconActionButton("复制", "copy", () => callNative("copyHistory", Number(item.id)));
     copy.classList.add("history-copy");
+    const footer = document.createElement("div");
+    footer.className = "history-footer";
+    footer.append(meta, copy);
     const remove = iconActionButton("删除", "close", () => {
       openConfirm("删除这条识别记录？删除后无法恢复。", "确认删除", () => callNative("deleteHistory", Number(item.id)));
     });
@@ -376,7 +569,7 @@
       }
     });
     [copy, remove].forEach((button) => button.addEventListener("click", (event) => event.stopPropagation()));
-    card.append(remove, text, meta, copy);
+    card.append(remove, text, footer);
     return card;
   }
 
@@ -394,6 +587,10 @@
   }
 
   function renderSettings() {
+    if (!state.engineMode) {
+      state.engineMode = ["local_dual", "local_dual_qwen"].includes(state.settings.engine) ? "correction" : "recognition";
+    }
+    renderEngineMode();
     elements.engineInputs.forEach((input) => {
       input.checked = input.value === state.settings.engine;
     });
@@ -402,15 +599,28 @@
     const opacity = Math.min(100, Math.max(35, Number(state.settings.overlayOpacity) || 72));
     elements.overlayOpacity.value = String(opacity);
     elements.overlayOpacityValue.value = `${opacity}%`;
+    elements.overlayPreview.style.setProperty("--overlay-demo-opacity", String(opacity / 100));
+    const overlaySize = Math.min(88, Math.max(48, Number(state.settings.overlaySize) || 64));
+    elements.overlaySize.value = String(overlaySize);
+    elements.overlaySizeValue.value = `${overlaySize} dp`;
+    elements.overlayPreview.style.setProperty("--overlay-demo-size", `${overlaySize}px`);
+    elements.overlayPreview.dataset.overlaySizeDp = String(overlaySize);
+    elements.overlayPreviewText.classList.toggle("is-hidden", state.settings.overlayTextEnabled === false);
     elements.overlayStatus.textContent = state.settings.overlayEnabled
       ? "悬浮小球已开启；点击开始或停止识别，长按可关闭。"
       : state.settings.overlayPermission
         ? "权限已允许，开启后可在其他应用上方识别。"
         : "首次开启时需要允许显示在其他应用上层。";
-    elements.devicePerformance.textContent = state.device.memoryGb
-      ? `本机约 ${state.device.memoryGb} GB 内存：${state.device.assessment}。`
-      : state.device.assessment;
     elements.versionText.textContent = state.version ? `悬浮语音按钮 ${state.version}` : "";
+  }
+
+  function renderEngineMode() {
+    elements.engineModeButtons.forEach((button) => {
+      button.setAttribute("aria-selected", String(button.dataset.engineMode === state.engineMode));
+    });
+    elements.engineCards.forEach((card) => {
+      card.hidden = card.dataset.engineMode !== state.engineMode;
+    });
   }
 
   function renderResources() {
@@ -443,7 +653,7 @@
     const purpose = document.createElement("p");
     heading.append(title, purpose);
     const status = document.createElement("span");
-    header.append(heading, status);
+    header.append(heading);
 
     const progress = document.createElement("progress");
     progress.className = "resource-progress";
@@ -461,7 +671,7 @@
     const error = document.createElement("p");
     error.className = "resource-error is-hidden";
     card.append(header, progress, stats, error, footer);
-    return { card, title, purpose, status, progress, amount, speed, space, error, footer, actionKey: "", statusValue: "" };
+    return { card, header, title, purpose, status, progress, amount, speed, space, error, footer, actionKey: "", statusValue: "" };
   }
 
   function updateResourceCard(record, resource) {
@@ -483,10 +693,13 @@
 
     const actionKey = resource.status;
     if (record.actionKey !== actionKey) {
+      record.status.remove();
       record.footer.replaceChildren();
       if (["downloading", "pausing"].includes(resource.status)) {
+        record.header.append(record.status);
         record.footer.append(resourceButton(resource.status === "pausing" ? "正在暂停" : "暂停下载", () => callNative("pauseResource", resource.id), false, resource.status === "pausing"));
       } else if (resource.status === "verifying") {
+        record.header.append(record.status);
         record.footer.append(resourceButton("正在校验完整性", () => {}, false, true));
       } else if (resource.status === "available") {
         record.footer.append(resourceButton("校验模型", () => callNative("verifyResource", resource.id)));
@@ -494,6 +707,7 @@
           openConfirm(`删除“${resource.name}”？之后仍可重新下载，应用本身不会被删除。`, "确认删除", () => callNative("deleteResource", resource.id));
         }, true));
       } else {
+        if (resource.status !== "missing") record.header.append(record.status);
         const label = resource.status === "paused" ? "继续下载" : resource.status === "error" ? "重试下载" : "下载模型";
         record.footer.append(resourceButton(label, () => callNative("downloadResource", resource.id)));
       }
@@ -537,6 +751,7 @@
     });
     callNative("setCurrentPage", page);
     waveform.refreshVisibility();
+    overlayWaveform.refreshVisibility();
   }
 
   function openConfirm(message, acceptLabel, action) {
@@ -582,8 +797,7 @@
       local_dual_qwen: ["zipformer-bilingual", "qwen3-asr-0.6b-int8"],
       local_zipformer: ["zipformer-bilingual"],
       local_paraformer: ["paraformer"],
-      local_qwen: ["qwen3-asr-0.6b-int8"],
-      system: []
+      local_qwen: ["qwen3-asr-0.6b-int8"]
     }[state.settings.engine] || [];
     return requirements.some((id) => !state.resources.some((item) => item.id === id && item.status === "available"));
   }
@@ -606,8 +820,7 @@
       local_dual_qwen: "实时＋Qwen 校正",
       local_zipformer: "仅实时",
       local_paraformer: "仅整段",
-      local_qwen: "仅 Qwen",
-      system: "系统识别"
+      local_qwen: "仅 Qwen"
     }[engine] || "未知方式";
   }
 
@@ -660,6 +873,10 @@
   elements.engineInputs.forEach((input) => input.addEventListener("change", () => {
     if (input.checked) callNative("setEngine", input.value);
   }));
+  elements.engineModeButtons.forEach((button) => button.addEventListener("click", () => {
+    state.engineMode = button.dataset.engineMode;
+    renderEngineMode();
+  }));
   elements.overlaySwitch.addEventListener("change", () => {
     const enabled = elements.overlaySwitch.checked;
     elements.overlaySwitch.disabled = true;
@@ -667,13 +884,38 @@
     window.setTimeout(() => { elements.overlaySwitch.disabled = false; }, 500);
   });
   elements.overlayTextSwitch.addEventListener("change", () => {
+    elements.overlayPreviewText.classList.toggle("is-hidden", !elements.overlayTextSwitch.checked);
     callNative("setOverlayTextEnabled", elements.overlayTextSwitch.checked);
   });
   elements.overlayOpacity.addEventListener("input", () => {
     elements.overlayOpacityValue.value = `${elements.overlayOpacity.value}%`;
+    elements.overlayPreview.style.setProperty("--overlay-demo-opacity", String(Number(elements.overlayOpacity.value) / 100));
   });
   elements.overlayOpacity.addEventListener("change", () => {
     callNative("setOverlayOpacity", Number(elements.overlayOpacity.value));
+  });
+  elements.overlaySize.addEventListener("input", () => {
+    const size = Number(elements.overlaySize.value);
+    elements.overlaySizeValue.value = `${size} dp`;
+    elements.overlayPreview.style.setProperty("--overlay-demo-size", `${size}px`);
+    elements.overlayPreview.dataset.overlaySizeDp = String(size);
+  });
+  elements.overlaySize.addEventListener("change", () => {
+    callNative("setOverlaySize", Number(elements.overlaySize.value));
+  });
+
+  elements.overlayPreviewOrb.addEventListener("click", () => {
+    overlayPreviewRecording = !overlayPreviewRecording;
+    overlayWaveform.setActive(overlayPreviewRecording);
+    elements.overlayPreviewOrb.classList.toggle("is-recording", overlayPreviewRecording);
+    elements.overlayPreviewOrb.setAttribute("aria-pressed", String(overlayPreviewRecording));
+    elements.overlayPreviewOrb.setAttribute(
+      "aria-label",
+      overlayPreviewRecording ? "悬浮球正在录音，点击停止录音" : "悬浮球当前为待机，点击开始录音"
+    );
+    elements.overlayPreviewText.textContent = overlayPreviewRecording
+      ? "正在识别：你好，今天测试一下中英文混合识别。"
+      : "待机：点击悬浮球开始识别。";
   });
   elements.copyDiagnosticsButton.addEventListener("click", () => callNative("copyDiagnostics"));
   elements.confirmCancel.addEventListener("click", closeConfirm);
@@ -686,8 +928,14 @@
     event.preventDefault();
     closeConfirm();
   });
-  reducedMotion.addEventListener?.("change", () => waveform.setActive(state.recognition.capturing));
-  document.addEventListener("visibilitychange", () => waveform.refreshVisibility());
+  reducedMotion.addEventListener?.("change", () => {
+    waveform.setActive(state.recognition.capturing);
+    overlayWaveform.refreshMotionPreference();
+  });
+  document.addEventListener("visibilitychange", () => {
+    waveform.refreshVisibility();
+    overlayWaveform.refreshVisibility();
+  });
 
   window.VoiceApp = { receive, handleBack };
   applyFullState(loadInitialState());

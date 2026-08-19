@@ -283,6 +283,15 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         }
 
         @JavascriptInterface
+        fun setOverlaySize(sizeDp: Int) = runOnUiThread {
+            val value = sizeDp.coerceIn(48, 88)
+            OverlayPreferences.setSize(this@MainActivity, value)
+            notifyOverlayAppearanceChanged()
+            logger.info("悬浮球大小已更改，大小=${value}dp", "settings-overlay-size")
+            emitSettings()
+        }
+
+        @JavascriptInterface
         fun copyHistory(id: Long) {
             databaseExecutor.execute {
                 val item = historyStore.get(id)
@@ -524,6 +533,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         put("overlayEnabled", FloatingVoiceService.isRunning)
         put("overlayTextEnabled", OverlayPreferences.textEnabled(this@MainActivity))
         put("overlayOpacity", OverlayPreferences.opacity(this@MainActivity))
+        put("overlaySize", OverlayPreferences.size(this@MainActivity))
         put("overlayPermission", Settings.canDrawOverlays(this@MainActivity))
         put(
             "microphonePermission",

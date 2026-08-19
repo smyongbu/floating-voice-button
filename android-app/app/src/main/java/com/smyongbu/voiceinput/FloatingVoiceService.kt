@@ -52,6 +52,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     private var manuallyHidden = false
     private var previousActive = false
     private var lastText = ""
+    private var ballSizeDp = OverlayPreferences.DEFAULT_SIZE
     private val appearanceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_APPEARANCE_CHANGED) applyAppearance()
@@ -100,7 +101,8 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
             addView(captionText, LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 1f))
             addView(close, LinearLayout.LayoutParams(dp(64), dp(48)).apply { marginEnd = dp(6) })
         }
-        ballParams = params(dp(58), dp(58), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE).apply {
+        ballSizeDp = OverlayPreferences.size(this)
+        ballParams = params(dp(ballSizeDp), dp(ballSizeDp), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE).apply {
             x = resources.displayMetrics.widthPixels - dp(78)
             y = resources.displayMetrics.heightPixels / 2
         }
@@ -209,7 +211,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         val safe = systemInsets()
         val minX = dp(8) + safe.left
         val maxX = (screenWidth - captionParams.width - dp(8) - safe.right).coerceAtLeast(minX)
-        captionParams.x = (ballParams.x - captionParams.width + dp(58)).coerceIn(
+        captionParams.x = (ballParams.x - captionParams.width + dp(ballSizeDp)).coerceIn(
             minX,
             maxX
         )
@@ -222,9 +224,9 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         val safe = systemInsets()
         val minX = margin + safe.left
         val minY = margin + safe.top
-        val maxX = (resources.displayMetrics.widthPixels - dp(58) - margin - safe.right)
+        val maxX = (resources.displayMetrics.widthPixels - dp(ballSizeDp) - margin - safe.right)
             .coerceAtLeast(minX)
-        val maxY = (resources.displayMetrics.heightPixels - dp(58) - margin - safe.bottom)
+        val maxY = (resources.displayMetrics.heightPixels - dp(ballSizeDp) - margin - safe.bottom)
             .coerceAtLeast(minY)
         ballParams.x = ballParams.x.coerceIn(minX, maxX)
         ballParams.y = ballParams.y.coerceIn(minY, maxY)
@@ -259,6 +261,14 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
 
     private fun applyAppearance() {
         ball.setOpacityPercent(OverlayPreferences.opacity(this))
+        val nextSizeDp = OverlayPreferences.size(this)
+        if (nextSizeDp != ballSizeDp) {
+            ballSizeDp = nextSizeDp
+            ballParams.width = dp(ballSizeDp)
+            ballParams.height = dp(ballSizeDp)
+            clampBallPosition()
+            moveCaption()
+        }
         applyCaptionVisibility(!manuallyHidden && (RecognitionController.isListening() || lastText.isNotBlank()))
     }
 

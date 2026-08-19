@@ -203,7 +203,7 @@ class FloatingBallView(context: Context) : View(context) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val size = resolveSize(dp(58f).toInt(), widthMeasureSpec)
+        val size = resolveSize(dp(OverlayPreferences.DEFAULT_SIZE.toFloat()).toInt(), widthMeasureSpec)
         setMeasuredDimension(size, size)
     }
 
