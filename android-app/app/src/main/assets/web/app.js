@@ -89,7 +89,73 @@
   let previewRecordingTimer = 0;
   let previewLevelTimer = 0;
   let overlayPreviewRecording = false;
+  let overlayPreviewTextVisible = false;
+  let overlayTextHideTimer = 0;
+  let overlayCorrectionTimer = 0;
+  let overlayCopyFeedbackTimer = 0;
+  let overlayFeedbackAnimation = null;
+  let overlayFeedbackTimer = 0;
+  let overlayAudioContext = null;
   const resourceCards = new Map();
+
+  function playOverlayClickFeedback() {
+    window.clearTimeout(overlayFeedbackTimer);
+    elements.overlayPreviewOrb.classList.remove("is-feedback-reduced");
+    overlayFeedbackAnimation?.cancel();
+    if (reducedMotion.matches || typeof elements.overlayPreviewOrb.animate !== "function") {
+      elements.overlayPreviewOrb.classList.add("is-feedback-reduced");
+      overlayFeedbackTimer = window.setTimeout(() => {
+        elements.overlayPreviewOrb.classList.remove("is-feedback-reduced");
+      }, 140);
+      return;
+    }
+    overlayFeedbackAnimation = elements.overlayPreviewOrb.animate(
+      [
+        { transform: "scale(1)" },
+        { transform: "scale(1.065)", offset: 0.38 },
+        { transform: "scale(1)" }
+      ],
+      {
+        duration: 180,
+        easing: "cubic-bezier(0.23, 1, 0.32, 1)"
+      }
+    );
+  }
+
+  function playOverlayCue(starting) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    try {
+      overlayAudioContext ||= new AudioContextClass();
+      const context = overlayAudioContext;
+      const frequencies = starting ? [587.33, 783.99] : [698.46, 523.25];
+      const schedule = () => {
+        const baseTime = context.currentTime + 0.008;
+        frequencies.forEach((frequency, index) => {
+          const startTime = baseTime + index * 0.07;
+          const stopTime = startTime + 0.105;
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(frequency, startTime);
+          gain.gain.setValueAtTime(0.0001, startTime);
+          gain.gain.exponentialRampToValueAtTime(0.045, startTime + 0.012);
+          gain.gain.exponentialRampToValueAtTime(0.0001, stopTime);
+          oscillator.connect(gain);
+          gain.connect(context.destination);
+          oscillator.start(startTime);
+          oscillator.stop(stopTime + 0.01);
+        });
+      };
+      if (context.state === "suspended") {
+        context.resume().then(schedule).catch(() => {});
+      } else {
+        schedule();
+      }
+    } catch (_error) {
+      // 浏览器不支持或阻止音频时，仍保留视觉反馈。
+    }
+  }
 
   function buildSmoothWavePath(width, centerY, amplitude, cycles, phase, count = 48) {
     const points = [];
@@ -103,6 +169,57 @@
         y: centerY + (harmonic + detail) * amplitude * envelope
       });
     }
+    let path = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const current = points[index];
+      const next = points[index + 1];
+      const midX = (current.x + next.x) / 2;
+      const midY = (current.y + next.y) / 2;
+      path += ` Q${current.x.toFixed(1)} ${current.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`;
+    }
+    const last = points[points.length - 1];
+    return `${path} L${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+  }
+
+  function buildOverlayWavePoints(width, centerY, amplitude, cycles, phase, count = 36) {
+    return Array.from({ length: count + 1 }, (_, index) => {
+      const ratio = index / count;
+      const envelope = Math.pow(Math.sin(Math.PI * ratio), 1.65);
+      const harmonic = Math.sin(ratio * Math.PI * 2 * cycles + phase);
+      const detail = Math.sin(ratio * Math.PI * 2 * (cycles * 1.9) - phase * 0.6) * 0.17;
+      return {
+        x: ratio * width,
+        y: centerY + (harmonic + detail) * amplitude * envelope
+      };
+    });
+  }
+
+  function buildOverlayArcPoints(centerX, centerY, radius, lowerHalf, count = 36) {
+    return Array.from({ length: count + 1 }, (_, index) => {
+      const ratio = index / count;
+      const angle = lowerHalf ? Math.PI + ratio * Math.PI : Math.PI - ratio * Math.PI;
+      return {
+        x: centerX + Math.cos(angle) * radius,
+        y: centerY + Math.sin(angle) * radius
+      };
+    });
+  }
+
+  function buildOverlayLinePoints(startX, endX, centerY, count = 36) {
+    return Array.from({ length: count + 1 }, (_, index) => ({
+      x: startX + (endX - startX) * (index / count),
+      y: centerY
+    }));
+  }
+
+  function interpolateOverlayPoints(fromPoints, toPoints, amount) {
+    return fromPoints.map((point, index) => ({
+      x: point.x + (toPoints[index].x - point.x) * amount,
+      y: point.y + (toPoints[index].y - point.y) * amount
+    }));
+  }
+
+  function buildOverlaySmoothPath(points) {
     let path = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
     for (let index = 1; index < points.length - 1; index += 1) {
       const current = points[index];
@@ -215,6 +332,12 @@
       this.targetSpeed = 0.012;
       this.speed = 0.012;
       this.phase = 0;
+      this.shapeMix = 0;
+      this.shapeTarget = 0;
+      this.shapeFrom = 0;
+      this.shapeStartedAt = 0;
+      this.shapeDuration = 280;
+      this.activeShapeDuration = this.shapeDuration;
       this.frame = 0;
       this.lastTime = 0;
       this.lastLevelAt = 0;
@@ -231,6 +354,7 @@
       this.targetSpeed = active ? 0.065 : 0.012;
       this.speed = active ? 0.065 : 0.012;
       this.lastLevelAt = active ? performance.now() : 0;
+      this.setShapeTarget(active ? 1 : 0, !reducedMotion.matches && this.isVisible());
       if (reducedMotion.matches || !this.isVisible()) {
         if (this.frame) cancelAnimationFrame(this.frame);
         this.frame = 0;
@@ -240,6 +364,27 @@
         return;
       }
       this.start();
+    }
+
+    setShapeTarget(target, animate = true) {
+      if (!animate) {
+        this.shapeMix = target;
+        this.shapeTarget = target;
+        this.shapeFrom = target;
+        this.shapeStartedAt = 0;
+        this.render();
+        return;
+      }
+      if (target !== this.shapeTarget) {
+        this.shapeFrom = this.shapeMix;
+        this.shapeTarget = target;
+        this.shapeStartedAt = performance.now();
+        this.activeShapeDuration = Math.max(100, this.shapeDuration * Math.abs(target - this.shapeMix));
+      }
+    }
+
+    get transitioning() {
+      return Math.abs(this.shapeMix - this.shapeTarget) > 0.001;
     }
 
     setLevel(raw) {
@@ -264,7 +409,7 @@
     }
 
     refreshVisibility() {
-      if (this.isVisible() && !reducedMotion.matches) {
+      if (this.isVisible() && !reducedMotion.matches && (this.active || this.transitioning)) {
         this.start();
       } else {
         if (this.frame) cancelAnimationFrame(this.frame);
@@ -279,6 +424,8 @@
         if (this.frame) cancelAnimationFrame(this.frame);
         this.frame = 0;
         this.level = this.active ? 0.42 : 0.08;
+        this.shapeMix = this.shapeTarget;
+        this.shapeFrom = this.shapeTarget;
         this.render();
         this.updateMotionState();
         return;
@@ -287,7 +434,7 @@
     }
 
     start() {
-      if (this.frame || !this.isVisible() || reducedMotion.matches) {
+      if (this.frame || !this.isVisible() || reducedMotion.matches || (!this.active && !this.transitioning)) {
         this.updateMotionState();
         return;
       }
@@ -304,6 +451,12 @@
       }
       const delta = Math.min(40, Math.max(0, time - this.lastTime));
       this.lastTime = time;
+      if (this.transitioning) {
+        const progress = Math.max(0, Math.min(1, (time - this.shapeStartedAt) / this.activeShapeDuration));
+        const eased = progress * progress * (3 - 2 * progress);
+        this.shapeMix = this.shapeFrom + (this.shapeTarget - this.shapeFrom) * eased;
+        if (progress >= 1) this.shapeMix = this.shapeTarget;
+      }
       if (this.active) {
         if (time - this.lastLevelAt > 420) {
           const voice = Math.max(0, Math.min(1, 0.5 + Math.sin(time * 0.0058) * 0.28 + Math.sin(time * 0.0091 + 1.2) * 0.18));
@@ -323,16 +476,33 @@
         this.targetSpeed = 0.012;
         this.speed = 0.012;
       }
-      this.phase += delta * (0.0022 + this.speed * 0.0255);
+      if (this.active) this.phase += delta * (0.0022 + this.speed * 0.0255) * this.shapeMix;
       this.render();
-      this.frame = requestAnimationFrame((next) => this.tick(next));
+      if (this.active || this.transitioning) {
+        this.frame = requestAnimationFrame((next) => this.tick(next));
+      } else {
+        this.frame = 0;
+        this.lastTime = 0;
+        this.updateMotionState();
+      }
     }
 
     render() {
       const amplitude = 2 + this.level * 18.5;
-      elements.overlayWaveBack.setAttribute("d", buildSmoothWavePath(120, 36, amplitude * 0.43, 2.9, -this.phase * 0.82, 36));
-      elements.overlayWaveMiddle.setAttribute("d", buildSmoothWavePath(120, 36, amplitude * 0.68, 1.82, this.phase * 0.64 + 0.7, 36));
-      elements.overlayWaveFront.setAttribute("d", buildSmoothWavePath(120, 36, amplitude, 2.25, this.phase, 36));
+      const standbyBack = buildOverlayLinePoints(38, 82, 36);
+      const standbyMiddle = buildOverlayArcPoints(60, 36, 22, true);
+      const standbyFront = buildOverlayArcPoints(60, 36, 22, false);
+      const back = buildOverlayWavePoints(120, 36, amplitude * 0.43, 2.9, -this.phase * 0.82);
+      const middle = buildOverlayWavePoints(120, 36, amplitude * 0.68, 1.82, this.phase * 0.64 + 0.7);
+      const front = buildOverlayWavePoints(120, 36, amplitude, 2.25, this.phase);
+      elements.overlayWaveBack.setAttribute("d", buildOverlaySmoothPath(interpolateOverlayPoints(standbyBack, back, this.shapeMix)));
+      elements.overlayWaveMiddle.setAttribute("d", buildOverlaySmoothPath(interpolateOverlayPoints(standbyMiddle, middle, this.shapeMix)));
+      elements.overlayWaveFront.setAttribute("d", buildOverlaySmoothPath(interpolateOverlayPoints(standbyFront, front, this.shapeMix)));
+      elements.overlayWaveBack.style.opacity = String(0.82 * this.shapeMix);
+      elements.overlayWaveMiddle.style.opacity = String(1 + (0.88 - 1) * this.shapeMix);
+      elements.overlayWaveFront.style.opacity = "1";
+      elements.overlayWaveMiddle.style.strokeWidth = String(1.65 + (1.45 - 1.65) * this.shapeMix);
+      elements.overlayWaveFront.style.strokeWidth = String(1.65 + (2.05 - 1.65) * this.shapeMix);
     }
   }
 
@@ -649,7 +819,10 @@
     elements.overlaySizeValue.value = `${overlaySize} dp`;
     elements.overlayPreview.style.setProperty("--overlay-demo-size", `${overlaySize}px`);
     elements.overlayPreview.dataset.overlaySizeDp = String(overlaySize);
-    elements.overlayPreviewText.classList.toggle("is-hidden", state.settings.overlayTextEnabled === false);
+    elements.overlayPreviewText.classList.toggle(
+      "is-hidden",
+      state.settings.overlayTextEnabled === false || !overlayPreviewTextVisible
+    );
     elements.overlayStatus.textContent = state.settings.overlayEnabled
       ? "悬浮小球已开启；点击开始或停止识别，长按可关闭。"
       : state.settings.overlayPermission
@@ -707,15 +880,14 @@
     stats.className = "resource-stats";
     const amount = document.createElement("span");
     const speed = document.createElement("span");
-    const space = document.createElement("span");
-    stats.append(amount, speed, space);
+    stats.append(amount, speed);
 
     const footer = document.createElement("div");
     footer.className = "resource-card-footer";
     const error = document.createElement("p");
     error.className = "resource-error is-hidden";
     card.append(header, progress, stats, error, footer);
-    return { card, header, title, purpose, status, progress, amount, speed, space, error, footer, actionKey: "", statusValue: "" };
+    return { card, header, title, purpose, status, progress, amount, speed, error, footer, actionKey: "", statusValue: "" };
   }
 
   function updateResourceCard(record, resource) {
@@ -731,7 +903,6 @@
     record.speed.textContent = resource.speedBytesPerSecond > 0
       ? `${formatBytes(resource.speedBytesPerSecond)}/秒 · ${formatEta(resource.etaSeconds)}`
       : `版本 ${resource.version}`;
-    record.space.textContent = resource.freeBytes > 0 ? `手机可用 ${formatBytes(resource.freeBytes)}` : "正在读取可用空间";
     record.error.textContent = resource.errorMessage || "";
     record.error.classList.toggle("is-hidden", !resource.errorMessage);
 
@@ -828,12 +999,12 @@
     return false;
   }
 
-  function showToast(message) {
+  function showToast(message, duration = 3200) {
     if (!message) return;
     window.clearTimeout(toastTimer);
     elements.toast.textContent = message;
     elements.toast.classList.add("is-visible");
-    toastTimer = window.setTimeout(() => elements.toast.classList.remove("is-visible"), 3200);
+    toastTimer = window.setTimeout(() => elements.toast.classList.remove("is-visible"), duration);
   }
 
   function hasMissingRequiredResources() {
@@ -905,7 +1076,7 @@
   elements.historySearch.addEventListener("input", (event) => {
     state.historyQuery = event.target.value || "";
     state.historyVisibleCount = 40;
-    renderHistory();
+    renderHistory({ preserveScroll: true });
   });
   elements.copyAllHistoryButton.addEventListener("click", () => {
     if (state.history.length) callNative("copyAllHistory");
@@ -932,7 +1103,10 @@
     window.setTimeout(() => { elements.overlaySwitch.disabled = false; }, 500);
   });
   elements.overlayTextSwitch.addEventListener("change", () => {
-    elements.overlayPreviewText.classList.toggle("is-hidden", !elements.overlayTextSwitch.checked);
+    elements.overlayPreviewText.classList.toggle(
+      "is-hidden",
+      !elements.overlayTextSwitch.checked || !overlayPreviewTextVisible
+    );
     callNative("setOverlayTextEnabled", elements.overlayTextSwitch.checked);
   });
   elements.overlayOpacity.addEventListener("input", () => {
@@ -953,17 +1127,70 @@
   });
 
   elements.overlayPreviewOrb.addEventListener("click", () => {
-    overlayPreviewRecording = !overlayPreviewRecording;
+    const nextRecording = !overlayPreviewRecording;
+    window.clearTimeout(overlayTextHideTimer);
+    window.clearTimeout(overlayCorrectionTimer);
+    window.clearTimeout(overlayCopyFeedbackTimer);
+    playOverlayClickFeedback();
+    playOverlayCue(nextRecording);
+    overlayPreviewRecording = nextRecording;
     overlayWaveform.setActive(overlayPreviewRecording);
     elements.overlayPreviewOrb.classList.toggle("is-recording", overlayPreviewRecording);
+    elements.overlayPreviewOrb.classList.toggle("is-standby", !overlayPreviewRecording);
     elements.overlayPreviewOrb.setAttribute("aria-pressed", String(overlayPreviewRecording));
     elements.overlayPreviewOrb.setAttribute(
       "aria-label",
-      overlayPreviewRecording ? "悬浮球正在录音，点击停止录音" : "悬浮球当前为待机，点击开始录音"
+      overlayPreviewRecording ? "悬浮球正在识别，点击完成识别" : "悬浮球当前为待机，点击开始语音识别"
     );
-    elements.overlayPreviewText.textContent = overlayPreviewRecording
-      ? "正在识别：你好，今天测试一下中英文混合识别。"
-      : "待机：点击悬浮球开始识别。";
+    const liveText = "你好，今天测试一下中英文混合识别。";
+    const correctedText = "你好，今天测试一下中文和英文混合识别。";
+    if (overlayPreviewRecording) {
+      overlayPreviewTextVisible = true;
+      elements.overlayPreviewText.classList.remove("is-copy-confirmation");
+      elements.overlayPreviewText.textContent = `正在识别：${liveText}`;
+      elements.overlayPreviewText.dataset.copyText = liveText;
+      elements.overlayPreviewText.classList.toggle("is-hidden", !elements.overlayTextSwitch.checked);
+    } else {
+      overlayPreviewTextVisible = true;
+      elements.overlayPreviewText.classList.remove("is-copy-confirmation");
+      if (state.engineMode === "correction") {
+        elements.overlayPreviewText.textContent = "正在校正…";
+        elements.overlayPreviewText.dataset.copyText = liveText;
+        overlayCorrectionTimer = window.setTimeout(() => {
+          elements.overlayPreviewText.textContent = correctedText;
+          elements.overlayPreviewText.dataset.copyText = correctedText;
+        }, 260);
+      } else {
+        elements.overlayPreviewText.textContent = liveText;
+        elements.overlayPreviewText.dataset.copyText = liveText;
+      }
+      elements.overlayPreviewText.classList.toggle("is-hidden", !elements.overlayTextSwitch.checked);
+      overlayTextHideTimer = window.setTimeout(() => {
+        overlayPreviewTextVisible = false;
+        elements.overlayPreviewText.classList.add("is-hidden");
+      }, 2000);
+    }
+  });
+  elements.overlayPreviewText.addEventListener("click", () => {
+    const text = elements.overlayPreviewText.dataset.copyText || elements.overlayPreviewText.textContent;
+    if (!text) return;
+    if (native && typeof native.copyText === "function") {
+      callNative("copyText", text);
+    } else if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    window.clearTimeout(overlayTextHideTimer);
+    window.clearTimeout(overlayCorrectionTimer);
+    window.clearTimeout(overlayCopyFeedbackTimer);
+    overlayPreviewTextVisible = true;
+    elements.overlayPreviewText.textContent = "已复制";
+    elements.overlayPreviewText.classList.add("is-copy-confirmation");
+    elements.overlayPreviewText.classList.remove("is-hidden");
+    overlayCopyFeedbackTimer = window.setTimeout(() => {
+      overlayPreviewTextVisible = false;
+      elements.overlayPreviewText.classList.add("is-hidden");
+      elements.overlayPreviewText.classList.remove("is-copy-confirmation");
+    }, 1000);
   });
   elements.copyDiagnosticsButton.addEventListener("click", () => callNative("copyDiagnostics"));
   elements.confirmCancel.addEventListener("click", closeConfirm);

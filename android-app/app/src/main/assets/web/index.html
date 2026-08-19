@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>悬浮语音按钮</title>
-  <link rel="stylesheet" href="styles.css?v=20260819-48">
+  <link rel="stylesheet" href="styles.css?v=20260819-49">
 </head>
 <body>
   <a class="skip-link" href="#mainContent">跳到主要内容</a>
@@ -139,8 +139,7 @@
         <section class="settings-section" aria-labelledby="engineTitle">
           <div class="section-heading">
             <div>
-              <p class="section-kicker engine-section-kicker">识别方案</p>
-              <h2 id="engineTitle" class="visually-hidden">识别方案</h2>
+              <h2 id="engineTitle" class="resource-section-title">识别方案</h2>
             </div>
           </div>
           <div class="engine-mode-switch" role="tablist" aria-label="识别方案类型">
@@ -189,7 +188,7 @@
         <section class="settings-section overlay-appearance" aria-labelledby="overlayTitle">
           <div class="setting-row overlay-toggle-row">
             <div class="setting-copy">
-              <h2 id="overlayTitle">悬浮语音按钮</h2>
+              <h2 id="overlayTitle" class="resource-section-title">悬浮语音按钮</h2>
               <p id="overlayStatus">开启后可在其他应用上方开始识别。</p>
             </div>
             <label class="switch-control">
@@ -199,9 +198,9 @@
             </label>
           </div>
           <div id="overlayPreview" class="overlay-demo" role="group" aria-label="可交互的悬浮球预览">
-            <div id="overlayPreviewText" class="overlay-demo-text" aria-live="polite">待机：点击悬浮球开始识别。</div>
+            <button id="overlayPreviewText" class="overlay-demo-text is-hidden" type="button" aria-live="polite" aria-label="点击复制识别文字">正在识别：你好，今天测试一下中英文混合识别。</button>
             <span class="overlay-demo-orb-shell">
-              <button id="overlayPreviewOrb" class="overlay-demo-orb" type="button" aria-pressed="false" aria-label="悬浮球当前为待机，点击开始录音">
+              <button id="overlayPreviewOrb" class="overlay-demo-orb is-standby" type="button" aria-pressed="false" aria-label="悬浮球当前为待机，点击开始语音识别">
                 <svg id="overlayWaveform" class="overlay-waveform" viewBox="0 0 120 72" preserveAspectRatio="none" aria-hidden="true" focusable="false">
                   <defs>
                     <linearGradient id="overlayWaveBackGradient" x1="0" y1="0" x2="1" y2="0">
@@ -235,7 +234,6 @@
           <div class="setting-row setting-row-compact">
             <div class="setting-copy">
               <h3>显示识别文字框</h3>
-              <p>关闭后仅显示悬浮球，结果仍保存。</p>
             </div>
             <label class="switch-control">
               <span class="visually-hidden">显示悬浮识别文字框</span>
@@ -310,6 +308,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script src="app.js?v=20260819-48" defer></script>
+  <script src="app.js?v=20260819-49" defer></script>
 </body>
 </html>

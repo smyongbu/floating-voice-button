@@ -7,12 +7,16 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -50,6 +54,11 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     private var level = 0f
     private var lastText = ""
     private var ballSizeDp = OverlayPreferences.DEFAULT_SIZE
+    private var toneGenerator: ToneGenerator? = null
+    private val hideCaptionAction = Runnable {
+        lastText = ""
+        applyCaptionVisibility(false)
+    }
     private val appearanceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_APPEARANCE_CHANGED) applyAppearance()
@@ -92,7 +101,12 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
             )
+            isClickable = true
+            isFocusable = true
+            contentDescription = "识别文字，点击复制"
         }
+        caption.setOnClickListener { copyCaptionText() }
+        toneGenerator = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 48) }.getOrNull()
         ballSizeDp = OverlayPreferences.size(this)
         ballParams = params(dp(ballSizeDp), dp(ballSizeDp), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE).apply {
             x = resources.displayMetrics.widthPixels - dp(78)
@@ -101,7 +115,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         captionParams = params(
             resolveCaptionWidth(),
             WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         )
         try {
             windowManager.addView(caption, captionParams)
@@ -147,7 +161,13 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
             stopSelf()
             true
         }
-        ball.setOnClickListener { RecognitionController.toggle() }
+        ball.setOnClickListener {
+            val starting = !RecognitionController.isListening()
+            ball.playTapFeedback()
+            ball.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            playCue(starting)
+            RecognitionController.toggle()
+        }
         ball.setOnLongClickListener { closeAction() }
         var pending: Runnable? = null
         ball.setOnTouchListener { _, event ->
@@ -261,10 +281,27 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     private fun applyCaptionVisibility(show: Boolean) {
         val visible = show && OverlayPreferences.textEnabled(this)
         caption.visibility = if (visible) View.VISIBLE else View.GONE
-        captionParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        captionParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         safeUpdate(caption, captionParams)
         if (visible) moveCaption()
+    }
+
+    private fun playCue(starting: Boolean) {
+        val tone = if (starting) ToneGenerator.TONE_PROP_BEEP2 else ToneGenerator.TONE_PROP_ACK
+        runCatching { toneGenerator?.startTone(tone, 145) }
+            .onFailure { logger.error("播放悬浮球提示音失败", it, "overlay-cue") }
+    }
+
+    private fun copyCaptionText() {
+        val value = lastText.trim()
+        if (value.isEmpty()) return
+        handler.removeCallbacks(hideCaptionAction)
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("识别文字", value))
+        captionText.text = "已复制"
+        applyCaptionVisibility(true)
+        handler.postDelayed(hideCaptionAction, 1_000L)
+        logger.info("已从悬浮文字框复制识别文字", "overlay-copy")
     }
 
     private fun applyAppearance() {
@@ -298,7 +335,15 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
             lastText = text
             ball.update(capturing, level)
             captionText.text = text.ifBlank { status }
-            applyCaptionVisibility(active || text.isNotBlank())
+            handler.removeCallbacks(hideCaptionAction)
+            when {
+                active -> applyCaptionVisibility(true)
+                text.isNotBlank() -> {
+                    applyCaptionVisibility(true)
+                    handler.postDelayed(hideCaptionAction, 2_000L)
+                }
+                else -> applyCaptionVisibility(false)
+            }
         }
     }
 
@@ -351,6 +396,8 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        toneGenerator?.release()
+        toneGenerator = null
         runCatching { unregisterReceiver(appearanceReceiver) }
         RecognitionController.removeListener(this)
         if (::ball.isInitialized) runCatching {

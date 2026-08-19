@@ -34,4 +34,11 @@ class FloatingWaveMathTest {
         assertTrue(rising > 0.08f)
         assertTrue(falling < 0.88f)
     }
+
+    @Test
+    fun shapeMorphKeepsExactEndpoints() {
+        assertEquals(0f, FloatingWaveMath.smoothStep(0f), 0.0001f)
+        assertEquals(1f, FloatingWaveMath.smoothStep(1f), 0.0001f)
+        assertTrue(FloatingWaveMath.smoothStep(0.5f) in 0f..1f)
+    }
 }

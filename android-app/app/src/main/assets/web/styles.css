@@ -298,6 +298,16 @@ button:disabled {
   line-height: 1.35;
 }
 
+.status-hint {
+  min-height: 1.4em;
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font-size: 0.8rem;
+  text-align: left;
+}
+
+.status-hint:empty { display: none; }
+
 .record-actions {
   position: relative;
   z-index: 1;
@@ -802,8 +812,11 @@ button:disabled {
 .overlay-demo-text {
   position: relative;
   box-sizing: border-box;
+  display: flex;
   width: min(220px, calc(100% - var(--overlay-demo-size, 64px) - 10px));
+  min-height: 62px;
   max-width: 220px;
+  align-items: center;
   padding: 11px 13px;
   border: 1px solid rgba(191, 219, 254, 0.9);
   border-radius: 14px;
@@ -814,6 +827,17 @@ button:disabled {
   box-shadow: 0 8px 24px rgba(42, 72, 130, 0.13);
   backdrop-filter: blur(14px) saturate(1.25);
   -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.overlay-demo-text:active { transform: scale(.985); }
+.overlay-demo-text:focus-visible { outline: 2px solid rgba(37, 99, 235, .72); outline-offset: 2px; }
+.overlay-demo-text.is-copy-confirmation {
+  color: #2563eb;
+  font-weight: 750;
+  justify-content: center;
+  text-align: center;
 }
 .overlay-demo-text.is-hidden { display: none; }
 .overlay-demo-orb-shell {
@@ -852,6 +876,7 @@ button:disabled {
   transition: transform 140ms var(--ease-out), opacity 160ms ease, box-shadow 180ms ease;
 }
 .overlay-demo-orb:active { transform: scale(.97); }
+.overlay-demo-orb.is-feedback-reduced { filter: brightness(1.08); }
 .overlay-demo-orb:focus-visible { outline: none; }
 .overlay-demo-orb::before {
   content: "";
@@ -862,11 +887,29 @@ button:disabled {
   background: radial-gradient(circle at 32% 25%, rgba(255, 255, 255, .92), transparent 52%);
   pointer-events: none;
 }
+.overlay-demo-orb::after {
+  content: "";
+  position: absolute;
+  inset: -10%;
+  z-index: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle, transparent 0 51%, rgba(103, 232, 249, .94) 61%, rgba(37, 99, 235, .72) 69%, transparent 82%);
+  filter: blur(calc(var(--overlay-demo-size, 64px) * .032));
+  opacity: 0;
+  transform: scale(.985);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
 .overlay-demo-orb.is-recording {
   box-shadow:
-    0 0 calc(var(--overlay-demo-size, 64px) * .3) rgba(56, 189, 248, .58),
-    0 calc(var(--overlay-demo-size, 64px) * .08) calc(var(--overlay-demo-size, 64px) * .22) rgba(30, 64, 175, .24),
+    0 0 calc(var(--overlay-demo-size, 64px) * .1) rgba(103, 232, 249, .92),
+    0 0 calc(var(--overlay-demo-size, 64px) * .17) rgba(37, 99, 235, .64),
     inset 0 1px 1px rgba(255, 255, 255, .78);
+}
+.overlay-demo-orb.is-recording::after { animation: overlay-recording-halo 2.2s ease-in-out infinite; }
+@keyframes overlay-recording-halo {
+  0%, 100% { opacity: .84; transform: scale(.985); }
+  50% { opacity: 1; transform: scale(1.015); }
 }
 .overlay-demo-orb .overlay-waveform {
   position: relative;
@@ -885,6 +928,11 @@ button:disabled {
 .overlay-wave-path-back { stroke: url("#overlayWaveBackGradient"); stroke-width: 1.15; opacity: .82; }
 .overlay-wave-path-middle { stroke: url("#overlayWaveMiddleGradient"); stroke-width: 1.45; opacity: .88; }
 .overlay-wave-path-front { stroke: url("#overlayWaveFrontGradient"); stroke-width: 2.05; filter: drop-shadow(0 0 1.2px rgba(255, 255, 255, .92)); }
+.overlay-demo-orb.is-standby .overlay-wave-path-middle,
+.overlay-demo-orb.is-standby .overlay-wave-path-front {
+  stroke: #6b7280;
+  filter: none;
+}
 .range-setting {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -904,10 +952,6 @@ button:disabled {
   margin-bottom: 16px;
   padding: 18px;
   border-radius: var(--radius-md);
-}
-
-.engine-section-kicker {
-  font-size: 0.9rem;
 }
 
 .section-description {
@@ -1487,12 +1531,23 @@ button:disabled {
   }
 
   .overlay-demo-orb,
-  .overlay-demo-orb::before {
+  .overlay-demo-orb::before,
+  .overlay-demo-orb::after {
     transition: none;
   }
 
   .overlay-demo-orb:active {
     transform: none;
+  }
+
+  .overlay-demo-orb.is-feedback-reduced {
+    transition: filter 140ms var(--ease-out);
+  }
+
+  .overlay-demo-orb.is-recording::after {
+    animation: none;
+    opacity: .9;
+    transform: scale(1);
   }
 }
 html,
