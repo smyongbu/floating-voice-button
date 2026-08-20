@@ -74,7 +74,9 @@ jobs:
           "$APKSIGNER" verify --verbose android-app/app/build/outputs/apk/debug/app-debug.apk
       - name: 检查安装包不含模型
         run: |
-          if unzip -l android-app/app/build/outputs/apk/debug/app-debug.apk | grep -E '\.(onnx|model|bin)[[:space:]]*$'; then
+          MODEL_ENTRIES="$(unzip -Z1 android-app/app/build/outputs/apk/debug/app-debug.apk | grep -Ei '(^|/)(models|resource-packs)/|\.(onnx|ort|model|gguf|safetensors|pt)$|(^|/)(base_acft_q8_0|encoder|decoder|joiner|model)\.bin$' || true)"
+          if [ -n "$MODEL_ENTRIES" ]; then
+            printf '%s\n' "$MODEL_ENTRIES"
             echo '错误：安装包中发现模型文件。'
             exit 1
           fi
