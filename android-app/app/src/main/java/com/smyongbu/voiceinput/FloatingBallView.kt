@@ -170,7 +170,6 @@ class FloatingBallView(context: Context) : View(context) {
     fun setOpacityPercent(percent: Int) {
         val fraction = percent.coerceIn(35, 100) / 100f
         alpha = fraction
-        elevation = dp(10f) * fraction
     }
 
     override fun onAttachedToWindow() {

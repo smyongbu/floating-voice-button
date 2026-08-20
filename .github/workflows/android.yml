@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: 检出源码
         uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
         run: node --check android-app/app/src/main/assets/web/app.js
       - name: 确认模型没有放进应用源码
         run: |
-          if find android-app/app/src/main -type f \( -name '*.onnx' -o -name '*.model' \) | grep -q .; then
+          if find android-app/app/src/main -type f \( -name '*.onnx' -o -name '*.model' -o -name '*.bin' \) | grep -q .; then
             echo '错误：模型文件不得放进 APK assets。'
             exit 1
           fi
@@ -50,8 +50,14 @@ jobs:
       - name: 准备固定开发签名
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/android-signing.jks"
           test -s "$RUNNER_TEMP/android-signing.jks"
       - name: 构建安卓安装包
@@ -68,14 +74,14 @@ jobs:
           "$APKSIGNER" verify --verbose android-app/app/build/outputs/apk/debug/app-debug.apk
       - name: 检查安装包不含模型
         run: |
-          if unzip -l android-app/app/build/outputs/apk/debug/app-debug.apk | grep -E '\.(onnx|model)[[:space:]]*$'; then
+          if unzip -l android-app/app/build/outputs/apk/debug/app-debug.apk | grep -E '\.(onnx|model|bin)[[:space:]]*$'; then
             echo '错误：安装包中发现模型文件。'
             exit 1
           fi
       - name: 保存安卓安装包
         uses: actions/upload-artifact@v4
         with:
-          name: 安卓语音输入-HTML界面-模型独立版
+          name: 安卓语音输入-Whisper二次识别版
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

@@ -25,7 +25,29 @@ class ModelManifestTest(unittest.TestCase):
         }
         self.assertEqual(60_142_871, totals["zipformer-bilingual"])
         self.assertEqual(81_904_027, totals["paraformer"])
+        self.assertEqual(81_768_602, totals["whisper-acft-multilingual-74"])
         self.assertTrue(all(len(item.sha256) == 64 for resource in resources for item in resource.files))
+
+    def test_whisper_manifest_pins_model_identity_license_and_download(self):
+        manifest = APP_ROOT / "app" / "src" / "main" / "assets" / "model-resources.json"
+        resources = json.loads(manifest.read_text(encoding="utf-8"))["resources"]
+        whisper = next(item for item in resources if item["id"] == "whisper-acft-multilingual-74")
+        self.assertEqual("base-74m-q8_0-acft-2024-07-07", whisper["version"])
+        self.assertEqual("Apache-2.0", whisper["license"])
+        self.assertEqual("https://huggingface.co/futo-org/acft-whisper-base", whisper["source"])
+        self.assertEqual(
+            "https://huggingface.co/futo-org/acft-whisper-base/blob/main/LICENSE",
+            whisper["licenseUrl"],
+        )
+        self.assertEqual(
+            [{
+                "path": "base_acft_q8_0.bin",
+                "bytes": 81_768_602,
+                "sha256": "e44f352c9aa2c3609dece20c733c4ad4a75c28cd9ab07d005383df55fa96efc4",
+                "url": "https://keyboard.futo.org/voice-input-multilingual-74.bin",
+            }],
+            whisper["files"],
+        )
 
     def test_manifest_rejects_path_traversal(self):
         payload = {

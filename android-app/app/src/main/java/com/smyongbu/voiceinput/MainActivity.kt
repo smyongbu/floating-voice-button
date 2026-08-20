@@ -12,9 +12,12 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
@@ -40,6 +43,12 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
     private lateinit var historyStore: HistoryStore
     private lateinit var logger: AppLogger
     private val databaseExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var testAudioPlayer: MediaPlayer? = null
+    private var testAudioRecordId: Long? = null
+    private var testAudioPrepared = false
+    private var testAudioPendingPositionMs = 0
+    private var testAudioRequestSerial = 0L
     private var pageReady = false
     private var currentPage = "recording"
     private var waitingForOverlayPermission = false
@@ -47,6 +56,20 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
     private var pendingAudioAction: PendingAudioAction? = null
     private var lastAudioDispatchAt = 0L
     private var availableResourceIds = emptySet<String>()
+    private val testAudioProgressTicker = object : Runnable {
+        override fun run() {
+            val player = testAudioPlayer ?: return
+            val recordId = testAudioRecordId ?: return
+            if (!testAudioPrepared || !runCatching { player.isPlaying }.getOrDefault(false)) return
+            emitTestAudioState(
+                recordId = recordId,
+                playing = true,
+                positionMs = runCatching { player.currentPosition }.getOrDefault(0),
+                durationMs = runCatching { player.duration }.getOrDefault(0),
+            )
+            mainHandler.postDelayed(this, TEST_AUDIO_PROGRESS_INTERVAL_MS)
+        }
+    }
     private val overlayStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == FloatingVoiceService.ACTION_STATE_CHANGED) emitSettings()
@@ -59,6 +82,12 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         setContentView(R.layout.activity_main)
         logger = AppLogger(this)
         historyStore = HistoryStore(applicationContext)
+        databaseExecutor.execute {
+            val deletedCount = historyStore.cleanupUnreferencedAudioFiles()
+            if (deletedCount > 0) {
+                logger.info("已清理无主测试录音，数量=$deletedCount", "test-audio-cleanup")
+            }
+        }
         ModelResourceManager.init(this)
         RecognitionController.init(this)
         availableResourceIds = ModelResourceManager.states()
@@ -175,12 +204,15 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
     override fun onPause() {
         RecognitionController.removeListener(this)
         ModelResourceManager.removeListener(this)
+        releaseTestAudioPlayer(emitState = true)
         super.onPause()
     }
 
     override fun onDestroy() {
         RecognitionController.removeListener(this)
         ModelResourceManager.removeListener(this)
+        releaseTestAudioPlayer(emitState = false)
+        mainHandler.removeCallbacksAndMessages(null)
         pageReady = false
         databaseExecutor.execute { historyStore.close() }
         databaseExecutor.shutdown()
@@ -254,8 +286,43 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         fun copyText(raw: String) = runOnUiThread { copyToClipboard(raw.take(MAX_TEXT_LENGTH)) }
 
         @JavascriptInterface
+        fun copyTestText(raw: String) = runOnUiThread {
+            copyToClipboard(
+                raw.take(MAX_TEXT_LENGTH),
+                label = "语音识别测试文字",
+                successMessage = "测试文字已复制。",
+            )
+        }
+
+        @JavascriptInterface
+        fun setTestModeEnabled(enabled: Boolean) = runOnUiThread {
+            if (RecognitionController.isListening()) {
+                emitSettings()
+                showMessage("识别结束后再更改测试模式。")
+                return@runOnUiThread
+            }
+            RecognitionTestMode.setEnabled(this@MainActivity, enabled)
+            logger.info("识别测试模式已更改，开启=$enabled", "settings-test-mode")
+            emitSettings()
+            val systemRecognition =
+                RecognitionController.selectedEngine() == RecognitionController.ENGINE_SYSTEM
+            showMessage(
+                when {
+                    enabled && systemRecognition -> "测试模式已开启；手机系统识别不会保存测试录音。"
+                    enabled -> "测试模式已开启。"
+                    else -> "测试模式已关闭，已有资料仍会保留。"
+                }
+            )
+        }
+
+        @JavascriptInterface
         fun setEngine(engine: String) = runOnUiThread {
             if (engine !in RecognitionController.validEngines) return@runOnUiThread
+            if (RecognitionController.isListening()) {
+                emitSettings()
+                showMessage("识别结束后才能切换方案。")
+                return@runOnUiThread
+            }
             RecognitionController.setEngine(engine)
             logger.info("识别方案已更改，方式=$engine", "settings-engine")
             emitSettings()
@@ -317,7 +384,8 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         }
 
         @JavascriptInterface
-        fun deleteHistory(id: Long) {
+        fun deleteHistory(id: Long) = runOnUiThread {
+            if (testAudioRecordId == id) releaseTestAudioPlayer(emitState = false)
             databaseExecutor.execute {
                 historyStore.delete(id)
                 logger.info("已删除一条识别历史", "history-delete")
@@ -326,12 +394,39 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         }
 
         @JavascriptInterface
-        fun clearHistory() {
+        fun clearHistory() = runOnUiThread {
+            releaseTestAudioPlayer(emitState = false)
             databaseExecutor.execute {
                 historyStore.clear()
                 logger.info("已清空识别历史", "history-clear")
                 emitHistory()
             }
+        }
+
+        @JavascriptInterface
+        fun clearTestData() = runOnUiThread {
+            releaseTestAudioPlayer(emitState = false)
+            databaseExecutor.execute {
+                historyStore.clearTestData()
+                logger.info("已清空识别测试资料，普通历史文字继续保留", "test-data-clear")
+                emitHistory()
+                showMessage("测试录音和识别对照已清空，最终文字仍保留。")
+            }
+        }
+
+        @JavascriptInterface
+        fun toggleTestAudio(id: Long, positionMs: Int) = runOnUiThread {
+            toggleTestAudioPlayback(id, positionMs)
+        }
+
+        @JavascriptInterface
+        fun seekTestAudio(id: Long, positionMs: Int) = runOnUiThread {
+            seekTestAudioPlayback(id, positionMs)
+        }
+
+        @JavascriptInterface
+        fun stopTestAudio() = runOnUiThread {
+            releaseTestAudioPlayer(emitState = true)
         }
 
         @JavascriptInterface
@@ -368,6 +463,179 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
                 }
             }
         }
+    }
+
+    private fun toggleTestAudioPlayback(recordId: Long, requestedPositionMs: Int) {
+        if (recordId <= 0L) return
+        val player = testAudioPlayer
+        if (player != null && testAudioRecordId == recordId) {
+            if (!testAudioPrepared) {
+                releaseTestAudioPlayer(emitState = true)
+                return
+            }
+            runCatching {
+                val durationMs = player.duration.coerceAtLeast(0)
+                if (player.isPlaying) {
+                    player.pause()
+                    testAudioPendingPositionMs = player.currentPosition.coerceAtLeast(0)
+                    mainHandler.removeCallbacks(testAudioProgressTicker)
+                    emitTestAudioState(recordId, false, testAudioPendingPositionMs, durationMs)
+                } else {
+                    val requested = requestedPositionMs.coerceAtLeast(0)
+                    val target = if (durationMs > 0 && requested >= durationMs) 0 else requested
+                    testAudioPendingPositionMs = target
+                    player.seekTo(target.toLong(), MediaPlayer.SEEK_CLOSEST)
+                    player.start()
+                    emitTestAudioState(recordId, true, target, durationMs)
+                    scheduleTestAudioProgress()
+                }
+            }.onFailure { handleTestAudioFailure(recordId, "toggle", it) }
+            return
+        }
+        prepareTestAudioPlayback(recordId, requestedPositionMs)
+    }
+
+    private fun prepareTestAudioPlayback(recordId: Long, requestedPositionMs: Int) {
+        releaseTestAudioPlayer(emitState = false)
+        testAudioRecordId = recordId
+        testAudioPendingPositionMs = requestedPositionMs.coerceAtLeast(0)
+        val requestSerial = ++testAudioRequestSerial
+        databaseExecutor.execute {
+            val audioFile = historyStore.audioFileForHistory(recordId)
+            runOnUiThread {
+                if (requestSerial != testAudioRequestSerial || testAudioRecordId != recordId) {
+                    return@runOnUiThread
+                }
+                if (audioFile == null) {
+                    testAudioRecordId = null
+                    testAudioPendingPositionMs = 0
+                    emitTestAudioState(recordId, false, 0, 0)
+                    showMessage("这条记录没有可播放的录音。")
+                    return@runOnUiThread
+                }
+
+                val player = MediaPlayer()
+                testAudioPlayer = player
+                testAudioPrepared = false
+                player.setOnPreparedListener { preparedPlayer ->
+                    if (
+                        preparedPlayer !== testAudioPlayer ||
+                        requestSerial != testAudioRequestSerial ||
+                        testAudioRecordId != recordId
+                    ) {
+                        runCatching { preparedPlayer.release() }
+                        return@setOnPreparedListener
+                    }
+                    testAudioPrepared = true
+                    val durationMs = preparedPlayer.duration.coerceAtLeast(0)
+                    val requested = testAudioPendingPositionMs.coerceAtLeast(0)
+                    val target = if (durationMs > 0 && requested >= durationMs) 0 else requested
+                    testAudioPendingPositionMs = target
+                    runCatching {
+                        preparedPlayer.seekTo(target.toLong(), MediaPlayer.SEEK_CLOSEST)
+                        preparedPlayer.start()
+                        emitTestAudioState(recordId, true, target, durationMs)
+                        scheduleTestAudioProgress()
+                    }.onFailure { handleTestAudioFailure(recordId, "start", it) }
+                }
+                player.setOnCompletionListener { completedPlayer ->
+                    if (completedPlayer !== testAudioPlayer || testAudioRecordId != recordId) {
+                        return@setOnCompletionListener
+                    }
+                    mainHandler.removeCallbacks(testAudioProgressTicker)
+                    val durationMs = runCatching { completedPlayer.duration }.getOrDefault(0).coerceAtLeast(0)
+                    testAudioPendingPositionMs = durationMs
+                    emitTestAudioState(recordId, false, durationMs, durationMs)
+                }
+                player.setOnErrorListener { failedPlayer, what, extra ->
+                    if (failedPlayer === testAudioPlayer && testAudioRecordId == recordId) {
+                        logger.warning(
+                            "测试录音播放失败，阶段=media，what=$what，extra=$extra",
+                            "test-audio-play",
+                        )
+                        releaseTestAudioPlayer(emitState = false)
+                        emitTestAudioState(recordId, false, 0, 0)
+                        showMessage("录音播放失败，请稍后重试。")
+                    }
+                    true
+                }
+                runCatching {
+                    player.setDataSource(audioFile.absolutePath)
+                    player.prepareAsync()
+                }.onFailure { handleTestAudioFailure(recordId, "prepare", it) }
+            }
+        }
+    }
+
+    private fun seekTestAudioPlayback(recordId: Long, requestedPositionMs: Int) {
+        if (testAudioRecordId != recordId) return
+        val target = requestedPositionMs.coerceAtLeast(0)
+        testAudioPendingPositionMs = target
+        val player = testAudioPlayer ?: return
+        if (!testAudioPrepared) return
+        runCatching {
+            val durationMs = player.duration.coerceAtLeast(0)
+            val boundedTarget = target.coerceAtMost(durationMs)
+            testAudioPendingPositionMs = boundedTarget
+            player.seekTo(boundedTarget.toLong(), MediaPlayer.SEEK_CLOSEST)
+            emitTestAudioState(recordId, player.isPlaying, boundedTarget, durationMs)
+        }.onFailure { handleTestAudioFailure(recordId, "seek", it) }
+    }
+
+    private fun scheduleTestAudioProgress() {
+        mainHandler.removeCallbacks(testAudioProgressTicker)
+        mainHandler.postDelayed(testAudioProgressTicker, TEST_AUDIO_PROGRESS_INTERVAL_MS)
+    }
+
+    private fun releaseTestAudioPlayer(emitState: Boolean) {
+        testAudioRequestSerial += 1L
+        mainHandler.removeCallbacks(testAudioProgressTicker)
+        val player = testAudioPlayer
+        val recordId = testAudioRecordId
+        val durationMs = if (player != null && testAudioPrepared) {
+            runCatching { player.duration }.getOrDefault(0).coerceAtLeast(0)
+        } else {
+            0
+        }
+        val positionMs = if (player != null && testAudioPrepared) {
+            runCatching { player.currentPosition }.getOrDefault(testAudioPendingPositionMs)
+                .coerceAtLeast(0)
+        } else {
+            testAudioPendingPositionMs.coerceAtLeast(0)
+        }
+        testAudioPlayer = null
+        testAudioRecordId = null
+        testAudioPrepared = false
+        testAudioPendingPositionMs = 0
+        runCatching { player?.release() }
+        if (emitState && recordId != null) {
+            emitTestAudioState(recordId, false, positionMs, durationMs)
+        }
+    }
+
+    private fun handleTestAudioFailure(recordId: Long, phase: String, error: Throwable) {
+        logger.warning(
+            "测试录音播放失败，阶段=$phase，类型=${error.javaClass.simpleName}",
+            "test-audio-play",
+        )
+        releaseTestAudioPlayer(emitState = false)
+        emitTestAudioState(recordId, false, 0, 0)
+        showMessage("录音播放失败，请稍后重试。")
+    }
+
+    private fun emitTestAudioState(
+        recordId: Long,
+        playing: Boolean,
+        positionMs: Int,
+        durationMs: Int,
+    ) {
+        emit(JSONObject().apply {
+            put("type", "testAudio")
+            put("recordId", recordId)
+            put("playing", playing)
+            put("positionMs", positionMs.coerceAtLeast(0))
+            put("durationMs", durationMs.coerceAtLeast(0))
+        })
     }
 
     private fun ensureAudio(action: PendingAudioAction, block: () -> Unit) {
@@ -473,6 +741,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         appendLine("系统：Android ${Build.VERSION.RELEASE}（API ${Build.VERSION.SDK_INT}）")
         appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL}")
         appendLine("识别方案：${RecognitionController.selectedEngine()}")
+        appendLine("识别测试模式：${RecognitionTestMode.isEnabled(this@MainActivity)}")
         appendLine("悬浮窗权限：${Settings.canDrawOverlays(this@MainActivity)}")
         appendLine("麦克风权限：${checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED}")
         appendLine("模型资源：")
@@ -544,6 +813,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
 
     private fun settingsJson() = JSONObject().apply {
         put("engine", RecognitionController.selectedEngine())
+        put("testModeEnabled", RecognitionTestMode.isEnabled(this@MainActivity))
         put("overlayEnabled", FloatingVoiceService.isRunning)
         put("overlayTextEnabled", OverlayPreferences.textEnabled(this@MainActivity))
         put("overlayOpacity", OverlayPreferences.opacity(this@MainActivity))
@@ -562,6 +832,16 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
                 put("text", item.text)
                 put("createdAt", item.createdAt)
                 put("engine", item.engine)
+                item.test?.let { test ->
+                    put("test", JSONObject().apply {
+                        put("rawText", test.realtimeDraft)
+                        put("secondPassText", test.secondPassText ?: JSONObject.NULL)
+                        put("selected", test.selectedResult.wireValue)
+                        put("audioAvailable", test.audioAvailable)
+                        put("durationMs", test.durationMs)
+                        put("audioBytes", test.audioBytes)
+                    })
+                }
             })
         }
     }
@@ -623,6 +903,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         private const val REQUEST_AUDIO = 1001
         private const val REQUEST_NOTIFICATIONS = 1002
         private const val MAX_TEXT_LENGTH = 100_000
+        private const val TEST_AUDIO_PROGRESS_INTERVAL_MS = 200L
         private const val APP_ASSET_HOST = "appassets.androidplatform.net"
         private const val ENTRY_URL = "https://appassets.androidplatform.net/assets/web/index.html"
         private const val STATE_PAGE = "current-page"

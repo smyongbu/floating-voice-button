@@ -64,6 +64,68 @@ internal object RecognitionText {
         return FinalRecognition(final, RecognitionResultSource.CORRECTED)
     }
 
+    fun chooseWhisperFinal(
+        realtime: String,
+        whisper: String,
+        audioSampleCount: Int,
+        sampleRateHz: Int = 16000,
+    ): FinalRecognition {
+        val live = cleanRealtime(realtime)
+        val candidate = cleanRealtime(whisper)
+        if (candidate.isEmpty() || candidate.none { it.isLetterOrDigit() }) {
+            return realtimeFallback(live)
+        }
+        if (whisper.any { Character.isISOControl(it) && !it.isWhitespace() }) {
+            return realtimeFallback(live)
+        }
+
+        val safeSampleRate = sampleRateHz.coerceAtLeast(1)
+        val audioSeconds = audioSampleCount.coerceAtLeast(0).toDouble() / safeSampleRate
+        val maximumMeaningfulLength = maxOf(64, kotlin.math.ceil(audioSeconds * 40.0).toInt())
+        if (meaningfulLength(candidate) > maximumMeaningfulLength || hasMechanicalLoop(candidate)) {
+            return realtimeFallback(live)
+        }
+        return FinalRecognition(candidate, RecognitionResultSource.CORRECTED)
+    }
+
+    private fun realtimeFallback(live: String): FinalRecognition = if (live.isEmpty()) {
+        FinalRecognition("", RecognitionResultSource.NONE)
+    } else {
+        FinalRecognition(live, RecognitionResultSource.REALTIME)
+    }
+
+    private fun hasMechanicalLoop(text: String): Boolean {
+        val normalized = text.lowercase().filter { it.isLetterOrDigit() }
+        if (normalized.length < 32) return false
+        val maximumPartLength = minOf(24, normalized.length / 4)
+        for (partLength in 2..maximumPartLength) {
+            var start = 0
+            while (start + partLength * 4 <= normalized.length) {
+                val part = normalized.substring(start, start + partLength)
+                var repeats = 1
+                while (
+                    start + (repeats + 1) * partLength <= normalized.length &&
+                    normalized.regionMatches(
+                        start + repeats * partLength,
+                        part,
+                        0,
+                        partLength,
+                    )
+                ) {
+                    repeats++
+                }
+                val repeatedLength = repeats * partLength
+                if (
+                    repeats >= 4 &&
+                    repeatedLength >= 32 &&
+                    repeatedLength * 4 >= normalized.length * 3
+                ) return true
+                start += maxOf(1, if (repeats > 1) repeatedLength else 1)
+            }
+        }
+        return false
+    }
+
     private fun meaningfulLength(text: String): Int = text.count { it.isLetterOrDigit() }
 
     private fun isEnglishHeavy(text: String): Boolean {

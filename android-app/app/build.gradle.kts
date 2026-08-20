@@ -17,14 +17,23 @@ val hasDevelopmentSigning = listOf(
 android {
     namespace = "com.smyongbu.voiceinput"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.smyongbu.voiceinput"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.10.2"
+        versionCode = 16
+        versionName = "0.11.0"
         ndk { abiFilters += "arm64-v8a" }
+        externalNativeBuild {
+            cmake {
+                arguments += listOf(
+                    "-DCMAKE_BUILD_TYPE=Release",
+                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
+                )
+            }
+        }
     }
 
     signingConfigs {
@@ -52,6 +61,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 }
 
 dependencies {

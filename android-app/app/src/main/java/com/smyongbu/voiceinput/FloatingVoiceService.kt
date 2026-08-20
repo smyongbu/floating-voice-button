@@ -1,5 +1,9 @@
 package com.smyongbu.voiceinput
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.TimeInterpolator
+import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -55,6 +59,9 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     private var lastText = ""
     private var ballSizeDp = OverlayPreferences.DEFAULT_SIZE
     private var toneGenerator: ToneGenerator? = null
+    private var snapAnimator: ValueAnimator? = null
+    private var attachedSide = FloatingOverlayGeometry.Side.RIGHT
+    private var restorablePosition = FloatingOverlayGeometry.StoredPosition(attachedSide, 0.5f)
     private val hideCaptionAction = Runnable {
         lastText = ""
         applyCaptionVisibility(false)
@@ -73,8 +80,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         notifyForeground()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         ball = FloatingBallView(this).apply {
-            contentDescription = "悬浮语音按钮。点击开始或停止，拖动改变位置，长按关闭。"
-            elevation = dp(10).toFloat()
+            contentDescription = "悬浮语音按钮。点击开始或停止，拖动后松手贴边，长按关闭。"
             isLongClickable = true
         }
         ball.setOpacityPercent(OverlayPreferences.opacity(this))
@@ -109,8 +115,12 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         toneGenerator = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 48) }.getOrNull()
         ballSizeDp = OverlayPreferences.size(this)
         ballParams = params(dp(ballSizeDp), dp(ballSizeDp), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE).apply {
-            x = resources.displayMetrics.widthPixels - dp(78)
-            y = resources.displayMetrics.heightPixels / 2
+            restorablePosition = OverlayPreferences.position(this@FloatingVoiceService)
+                ?: FloatingOverlayGeometry.StoredPosition(FloatingOverlayGeometry.Side.RIGHT, 0.5f)
+            attachedSide = restorablePosition.side
+            val bounds = ballBounds()
+            x = FloatingOverlayGeometry.xForSide(attachedSide, bounds)
+            y = FloatingOverlayGeometry.yFromNormalized(restorablePosition.normalizedY, bounds)
         }
         captionParams = params(
             resolveCaptionWidth(),
@@ -173,6 +183,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         ball.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    cancelSnapAnimation()
                     downX = event.rawX
                     downY = event.rawY
                     startX = ballParams.x
@@ -198,18 +209,25 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
                     if (!longPressed) {
                         ballParams.x = startX + x
                         ballParams.y = startY + y
-                        clampBallPosition()
+                        clampBallPosition(updateSide = true)
                         moveCaption()
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     pending?.let(handler::removeCallbacks)
-                    if (!moved && !longPressed) ball.performClick()
+                    when {
+                        !moved && !longPressed -> {
+                            ball.performClick()
+                            settleBallIfNeeded()
+                        }
+                        moved && !longPressed -> snapBallToNearestEdge()
+                    }
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     pending?.let(handler::removeCallbacks)
+                    if (!longPressed) settleBallIfNeeded()
                     true
                 }
                 else -> false
@@ -218,8 +236,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     }
 
     private fun moveCaption() {
-        val screenWidth = resources.displayMetrics.widthPixels
-        val screenHeight = resources.displayMetrics.heightPixels
+        val (screenWidth, screenHeight) = screenSize()
         val safe = systemInsets()
         val minX = dp(8) + safe.left
         val maxX = (screenWidth - captionParams.width - dp(8) - safe.right).coerceAtLeast(minX)
@@ -233,10 +250,12 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         val captionHeight = caption.measuredHeight.coerceAtLeast(dp(42))
         val minY = dp(8) + safe.top
         val maxY = (screenHeight - captionHeight - dp(8) - safe.bottom).coerceAtLeast(minY)
-        val canFitLeft = left >= minX
-        val canFitRight = right <= maxX
-        if (canFitLeft || canFitRight) {
-            captionParams.x = if (canFitLeft) left else right
+        val preferredX = when (attachedSide) {
+            FloatingOverlayGeometry.Side.LEFT -> right
+            FloatingOverlayGeometry.Side.RIGHT -> left
+        }
+        if (preferredX in minX..maxX) {
+            captionParams.x = preferredX
             captionParams.y = (ballParams.y + (dp(ballSizeDp) - captionHeight) / 2).coerceIn(minY, maxY)
         } else {
             captionParams.x = (ballParams.x + (dp(ballSizeDp) - captionParams.width) / 2)
@@ -248,18 +267,113 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         safeUpdate(caption, captionParams)
     }
 
-    private fun clampBallPosition() {
-        val margin = dp(4)
-        val safe = systemInsets()
-        val minX = margin + safe.left
-        val minY = margin + safe.top
-        val maxX = (resources.displayMetrics.widthPixels - dp(ballSizeDp) - margin - safe.right)
-            .coerceAtLeast(minX)
-        val maxY = (resources.displayMetrics.heightPixels - dp(ballSizeDp) - margin - safe.bottom)
-            .coerceAtLeast(minY)
-        ballParams.x = ballParams.x.coerceIn(minX, maxX)
-        ballParams.y = ballParams.y.coerceIn(minY, maxY)
+    private fun clampBallPosition(updateSide: Boolean = false) {
+        val bounds = ballBounds()
+        ballParams.x = ballParams.x.coerceIn(bounds.minX, bounds.maxX)
+        ballParams.y = ballParams.y.coerceIn(bounds.minY, bounds.maxY)
+        if (updateSide) attachedSide = FloatingOverlayGeometry.nearestSide(ballParams.x, bounds)
         safeUpdate(ball, ballParams)
+    }
+
+    private fun ballBounds(): FloatingOverlayGeometry.Bounds {
+        val safe = systemInsets()
+        val (screenWidth, screenHeight) = screenSize()
+        return FloatingOverlayGeometry.bounds(
+            screenWidth = screenWidth,
+            screenHeight = screenHeight,
+            ballSize = dp(ballSizeDp),
+            margin = dp(4),
+            insetLeft = safe.left,
+            insetTop = safe.top,
+            insetRight = safe.right,
+            insetBottom = safe.bottom,
+        )
+    }
+
+    private fun screenSize(): Pair<Int, Int> = if (Build.VERSION.SDK_INT >= 30) {
+        val bounds = windowManager.currentWindowMetrics.bounds
+        bounds.width() to bounds.height()
+    } else {
+        resources.displayMetrics.widthPixels to resources.displayMetrics.heightPixels
+    }
+
+    private fun snapBallToNearestEdge() {
+        cancelSnapAnimation()
+        val bounds = ballBounds()
+        attachedSide = FloatingOverlayGeometry.nearestSide(ballParams.x, bounds)
+        restorablePosition = FloatingOverlayGeometry.StoredPosition(
+            side = attachedSide,
+            normalizedY = FloatingOverlayGeometry.normalizedY(ballParams.y, bounds),
+        )
+        OverlayPreferences.setPosition(this, restorablePosition)
+        val startX = ballParams.x
+        val startY = ballParams.y
+        val targetX = FloatingOverlayGeometry.xForSide(attachedSide, bounds)
+        val targetY = FloatingOverlayGeometry.yFromNormalized(restorablePosition.normalizedY, bounds)
+        if (startX == targetX || !ValueAnimator.areAnimatorsEnabled()) {
+            placeBall(targetX, targetY)
+            logSnapCompleted()
+            return
+        }
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 200L
+            interpolator = TimeInterpolator { progress ->
+                FloatingOverlayGeometry.easeOutCubic(progress)
+            }
+            addUpdateListener { value ->
+                val progress = value.animatedValue as Float
+                placeBall(
+                    FloatingOverlayGeometry.interpolate(startX, targetX, progress),
+                    FloatingOverlayGeometry.interpolate(startY, targetY, progress),
+                )
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (snapAnimator !== animation) return
+                    snapAnimator = null
+                    placeBall(targetX, targetY)
+                    logSnapCompleted()
+                }
+            })
+        }
+        snapAnimator = animator
+        animator.start()
+    }
+
+    private fun settleBallIfNeeded() {
+        val bounds = ballBounds()
+        val targetX = FloatingOverlayGeometry.xForSide(
+            FloatingOverlayGeometry.nearestSide(ballParams.x, bounds),
+            bounds,
+        )
+        if (ballParams.x != targetX) snapBallToNearestEdge()
+    }
+
+    private fun placeBall(x: Int, y: Int) {
+        ballParams.x = x
+        ballParams.y = y
+        safeUpdate(ball, ballParams)
+        moveCaption()
+    }
+
+    private fun cancelSnapAnimation() {
+        val running = snapAnimator ?: return
+        snapAnimator = null
+        running.cancel()
+    }
+
+    private fun logSnapCompleted() {
+        val side = if (attachedSide == FloatingOverlayGeometry.Side.LEFT) "左侧" else "右侧"
+        logger.info("悬浮球已吸附到${side}安全边缘", "overlay-snap")
+    }
+
+    private fun restoreBallPosition() {
+        attachedSide = restorablePosition.side
+        val bounds = ballBounds()
+        placeBall(
+            FloatingOverlayGeometry.xForSide(attachedSide, bounds),
+            FloatingOverlayGeometry.yFromNormalized(restorablePosition.normalizedY, bounds),
+        )
     }
 
     private fun systemInsets(): SafeInsets = if (Build.VERSION.SDK_INT >= 30) {
@@ -271,10 +385,10 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        cancelSnapAnimation()
         handler.post {
             captionParams.width = resolveCaptionWidth()
-            clampBallPosition()
-            moveCaption()
+            restoreBallPosition()
         }
     }
 
@@ -308,12 +422,18 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
         ball.setOpacityPercent(OverlayPreferences.opacity(this))
         val nextSizeDp = OverlayPreferences.size(this)
         if (nextSizeDp != ballSizeDp) {
+            cancelSnapAnimation()
+            val oldBounds = ballBounds()
+            restorablePosition = FloatingOverlayGeometry.StoredPosition(
+                side = attachedSide,
+                normalizedY = FloatingOverlayGeometry.normalizedY(ballParams.y, oldBounds),
+            )
             ballSizeDp = nextSizeDp
             ballParams.width = dp(ballSizeDp)
             ballParams.height = dp(ballSizeDp)
             captionParams.width = resolveCaptionWidth()
-            clampBallPosition()
-            moveCaption()
+            OverlayPreferences.setPosition(this, restorablePosition)
+            restoreBallPosition()
         }
         applyCaptionVisibility(RecognitionController.isListening() || lastText.isNotBlank())
     }
@@ -348,7 +468,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     }
 
     private fun resolveCaptionWidth(): Int {
-        val available = resources.displayMetrics.widthPixels - dp(ballSizeDp) - dp(36)
+        val available = screenSize().first - dp(ballSizeDp) - dp(36)
         return minOf(dp(220), available).coerceAtLeast(dp(180))
     }
 
@@ -395,6 +515,7 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        cancelSnapAnimation()
         handler.removeCallbacksAndMessages(null)
         toneGenerator?.release()
         toneGenerator = null

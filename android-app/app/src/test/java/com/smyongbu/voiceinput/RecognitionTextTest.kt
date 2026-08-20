@@ -81,4 +81,98 @@ class RecognitionTextTest {
         )
         assertEquals(RecognitionResultSource.CORRECTED, result.source)
     }
+
+    @Test fun whisperWinsEvenWhenItCorrectsACompletelyDifferentDraft() {
+        val result = RecognitionText.chooseWhisperFinal(
+            realtime = "今天下午开一个破见会议",
+            whisper = "今天下午开 project meeting，please bring the sales report。",
+            audioSampleCount = 16000 * 5,
+        )
+        assertEquals(RecognitionResultSource.CORRECTED, result.source)
+        assertEquals("今天下午开 project meeting，please bring the sales report。", result.text)
+    }
+
+    @Test fun whisperDoesNotUseRelativeLengthAsARejectionRule() {
+        val shorter = RecognitionText.chooseWhisperFinal(
+            realtime = "这是一个很长但是有很多错误而且重复的实时初稿",
+            whisper = "正确短句",
+            audioSampleCount = 16000 * 3,
+        )
+        val longer = RecognitionText.chooseWhisperFinal(
+            realtime = "开会",
+            whisper = "今天下午三点开 project meeting 并把完整报告发给 Alice",
+            audioSampleCount = 16000 * 4,
+        )
+        assertEquals(RecognitionResultSource.CORRECTED, shorter.source)
+        assertEquals(RecognitionResultSource.CORRECTED, longer.source)
+    }
+
+    @Test fun invalidWhisperOutputFallsBackToRealtime() {
+        listOf("", "……？！", "有效前缀\u0000异常").forEach { invalid ->
+            val result = RecognitionText.chooseWhisperFinal(
+                realtime = "保留实时初稿",
+                whisper = invalid,
+                audioSampleCount = 16000 * 2,
+            )
+            assertEquals(RecognitionResultSource.REALTIME, result.source)
+            assertEquals("保留实时初稿", result.text)
+        }
+    }
+
+    @Test fun impossibleWhisperOutputRateFallsBackToRealtime() {
+        val result = RecognitionText.chooseWhisperFinal(
+            realtime = "保留实时初稿",
+            whisper = "字".repeat(200),
+            audioSampleCount = 16000,
+        )
+        assertEquals(RecognitionResultSource.REALTIME, result.source)
+    }
+
+    @Test fun mechanicalWhisperLoopFallsBackButNormalRepeatDoesNot() {
+        val loop = RecognitionText.chooseWhisperFinal(
+            realtime = "保留实时初稿",
+            whisper = "感谢观看".repeat(12),
+            audioSampleCount = 16000 * 8,
+        )
+        val normal = RecognitionText.chooseWhisperFinal(
+            realtime = "",
+            whisper = "这个这个问题需要再确认一次",
+            audioSampleCount = 16000 * 3,
+        )
+        val shortEmphasis = RecognitionText.chooseWhisperFinal(
+            realtime = "",
+            whisper = "哈哈哈哈哈哈哈哈",
+            audioSampleCount = 16000 * 2,
+        )
+        assertEquals(RecognitionResultSource.REALTIME, loop.source)
+        assertEquals(RecognitionResultSource.CORRECTED, normal.source)
+        assertEquals(RecognitionResultSource.CORRECTED, shortEmphasis.source)
+    }
+
+    @Test fun standaloneWhisperCanProduceOrRejectTheOnlyResult() {
+        val valid = RecognitionText.chooseWhisperFinal(
+            realtime = "",
+            whisper = "你好 Hello",
+            audioSampleCount = 16000 * 2,
+        )
+        val empty = RecognitionText.chooseWhisperFinal(
+            realtime = "",
+            whisper = "！",
+            audioSampleCount = 16000 * 2,
+        )
+        assertEquals(RecognitionResultSource.CORRECTED, valid.source)
+        assertEquals(RecognitionResultSource.NONE, empty.source)
+    }
+
+    @Test fun whisperOutputAtFortyCharactersPerSecondIsAccepted() {
+        val eightyDistinctCharacters = (0 until 80).joinToString("") {
+            (0x4E00 + it).toChar().toString()
+        }
+        val result = RecognitionText.chooseWhisperFinal(
+            realtime = "",
+            whisper = eightyDistinctCharacters,
+            audioSampleCount = 16000 * 2,
+        )
+        assertEquals(RecognitionResultSource.CORRECTED, result.source)
+    }
 }

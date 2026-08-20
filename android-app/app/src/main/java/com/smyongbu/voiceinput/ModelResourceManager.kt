@@ -36,6 +36,7 @@ object ModelResourceManager {
     const val ZIPFORMER_ID = "zipformer-bilingual"
     const val PARAFORMER_ID = "paraformer"
     const val QWEN_ID = "qwen3-asr-0.6b-int8"
+    const val WHISPER_ACFT_ID = "whisper-acft-multilingual-74"
 
     interface Listener {
         fun onModelResourcesChanged(states: List<ModelResourceState>)
@@ -123,6 +124,20 @@ object ModelResourceManager {
                     "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/63ddc3cd0f2810b68289a7b3876e62ef5d53d6df/tokens.txt",
                     75_352,
                     "4b2d964e18b9cf139b473003b6698fb2ed9a2a5ec55b93daa677b28f578897aa"
+                )
+            )
+        ),
+        BundleSpec(
+            id = WHISPER_ACFT_ID,
+            name = "Whisper ACFT 多语言整段模型",
+            purpose = "停止后对原始录音进行完整识别；组合方案中作为第二次完整识别，支持中文、英文和中英混说",
+            version = "base-74m-q8_0-acft-2024-07-07",
+            files = listOf(
+                FileSpec(
+                    "base_acft_q8_0.bin",
+                    "https://keyboard.futo.org/voice-input-multilingual-74.bin",
+                    81_768_602,
+                    "e44f352c9aa2c3609dece20c733c4ad4a75c28cd9ab07d005383df55fa96efc4"
                 )
             )
         )

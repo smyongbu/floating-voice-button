@@ -102,6 +102,23 @@
           "url": "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/tokenizer/vocab.json"
         }
       ]
+    },
+    {
+      "id": "whisper-acft-multilingual-74",
+      "name": "Whisper ACFT 多语言整段模型",
+      "purpose": "停止后对原始录音进行完整识别；组合方案中作为第二次完整识别，支持中文、英文和中英混说",
+      "version": "base-74m-q8_0-acft-2024-07-07",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/futo-org/acft-whisper-base/blob/main/LICENSE",
+      "source": "https://huggingface.co/futo-org/acft-whisper-base",
+      "files": [
+        {
+          "path": "base_acft_q8_0.bin",
+          "bytes": 81768602,
+          "sha256": "e44f352c9aa2c3609dece20c733c4ad4a75c28cd9ab07d005383df55fa96efc4",
+          "url": "https://keyboard.futo.org/voice-input-multilingual-74.bin"
+        }
+      ]
     }
   ]
 }

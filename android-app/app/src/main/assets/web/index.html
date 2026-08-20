@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>悬浮语音按钮</title>
-  <link rel="stylesheet" href="styles.css?v=20260819-49">
+  <link rel="stylesheet" href="styles.css?v=20260821-08">
 </head>
 <body>
   <a class="skip-link" href="#mainContent">跳到主要内容</a>
@@ -32,11 +32,21 @@
           <svg class="active-models-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg>
         </button>
 
+        <aside id="testModeBanner" class="test-mode-banner is-hidden" aria-label="识别测试模式状态">
+          <span class="test-mode-banner-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v5l-5.2 8.7A2.8 2.8 0 0 0 7.2 21h9.6a2.8 2.8 0 0 0 2.4-4.3L14 8V3"></path><path d="M7.2 15h9.6"></path></svg>
+          </span>
+          <span class="test-mode-banner-copy">
+            <strong>测试模式已开启</strong>
+            <span id="testModeBannerText">本次将保留实时初稿、第二次识别结果和录音</span>
+          </span>
+          <button id="openLatestTestButton" class="test-mode-banner-action is-hidden" type="button">查看</button>
+        </aside>
+
         <section class="transcript-card" aria-labelledby="transcriptTitle">
           <div class="section-heading compact-heading">
-            <div class="transcript-heading-copy">
+            <div>
               <h2 id="transcriptTitle" class="transcript-section-title">识别结果</h2>
-              <button id="cancelButton" class="button button-quiet transcript-cancel-button is-hidden" type="button">取消本次</button>
             </div>
             <button id="copyTranscriptButton" class="icon-text-button" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -46,9 +56,7 @@
               复制
             </button>
           </div>
-          <div class="transcript-body">
-            <p id="transcriptText" class="transcript-text is-placeholder">识别文字会显示在这里</p>
-          </div>
+          <p id="transcriptText" class="transcript-text is-placeholder">识别文字会显示在这里</p>
           <p id="recognitionAnnouncement" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
         </section>
 
@@ -88,6 +96,8 @@
               </svg>
               <span id="recordButtonText">开始识别</span>
             </button>
+            <button id="cancelButton" class="button button-quiet is-hidden" type="button">取消本次</button>
+            <p id="statusHint" class="status-hint">准备完成后即可开始识别</p>
           </div>
         </section>
 
@@ -106,26 +116,26 @@
           <button id="clearHistoryButton" class="button button-danger-quiet" type="button">清空</button>
         </header>
 
-        <button id="loadMoreHistory" class="button button-secondary history-load-more is-hidden" type="button">显示更早记录</button>
+        <div class="search-field">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+          <label class="visually-hidden" for="historySearch">搜索识别记录</label>
+          <input id="historySearch" type="search" inputmode="search" placeholder="搜索记录" autocomplete="off">
+        </div>
+
+        <div class="history-filter" role="tablist" aria-label="记录类型">
+          <button type="button" role="tab" data-history-filter="all" aria-selected="true">全部记录</button>
+          <button type="button" role="tab" data-history-filter="test" aria-selected="false">测试记录 <span id="historyTestFilterCount">1</span></button>
+        </div>
+
         <div id="historyEmpty" class="empty-state">
           <div class="empty-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M7 3h10a2 2 0 0 1 2 2v16l-7-3-7 3V5a2 2 0 0 1 2-2Z"></path></svg>
           </div>
-          <h2>识别完成后会出现在这里</h2>
-          <p>最多保存 500 条；本地识别不上传录音，系统识别取决于手机语音服务。</p>
+          <h2 id="historyEmptyTitle">识别完成后会出现在这里</h2>
+          <p id="historyEmptyText">最多保存 500 条；本地识别不上传录音，系统识别取决于手机语音服务。</p>
         </div>
         <div id="historyList" class="history-list"></div>
-        <div class="history-search-dock">
-          <div class="search-field history-search-field">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
-            <label class="visually-hidden" for="historySearch">搜索识别记录</label>
-            <input id="historySearch" type="search" inputmode="search" placeholder="搜索记录" autocomplete="off">
-            <button id="copyAllHistoryButton" class="history-copy-all" type="button" aria-label="复制全部识别记录">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"></path></svg>
-              <span>复制全部</span>
-            </button>
-          </div>
-        </div>
+        <button id="loadMoreHistory" class="button button-secondary is-hidden" type="button">显示更多记录</button>
       </section>
 
       <section class="page" data-page="settings" aria-labelledby="settingsTitle" hidden>
@@ -157,6 +167,11 @@
               <span class="radio-mark" aria-hidden="true"></span>
               <span class="engine-copy"><strong>Zipformer ＋ Qwen3-ASR</strong><small>实时出字，停止后使用高质量模型校正中英文混说</small><em>高质量 · 2 套模型 · 约 998.6 MB</em></span>
             </label>
+            <label class="engine-card" data-engine-mode="correction">
+              <input type="radio" name="engine" value="local_dual_whisper_acft">
+              <span class="radio-mark" aria-hidden="true"></span>
+              <span class="engine-copy"><strong>Zipformer ＋ Whisper ACFT</strong><small>实时出字；停止后，Whisper ACFT 对原始录音进行第二次完整识别并生成最终文字</small><em>对照 · 2 套模型 · 约 135.3 MB</em></span>
+            </label>
             <label class="engine-card" data-engine-mode="recognition">
               <input type="radio" name="engine" value="local_zipformer">
               <span class="radio-mark" aria-hidden="true"></span>
@@ -172,6 +187,11 @@
               <span class="radio-mark" aria-hidden="true"></span>
               <span class="engine-copy"><strong>仅 Qwen3-ASR</strong><small>一套高质量整段模型：停止后生成文字，不显示实时结果</small><em>1 套模型 · 约 941.3 MB</em></span>
             </label>
+            <label class="engine-card" data-engine-mode="recognition">
+              <input type="radio" name="engine" value="local_whisper_acft">
+              <span class="radio-mark" aria-hidden="true"></span>
+              <span class="engine-copy"><strong>Whisper ACFT 多语言</strong><small>停止后整段识别，针对手机短语音等待进行了优化</small><em>对照方案 · 1 套模型 · 约 78.0 MB</em></span>
+            </label>
           </div>
         </section>
 
@@ -185,7 +205,7 @@
           <p id="resourceAnnouncement" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
         </section>
 
-        <section class="settings-section overlay-appearance" aria-labelledby="overlayTitle">
+        <section class="settings-section overlay-appearance" aria-labelledby="overlayTitle overlayAppearanceTitle">
           <div class="setting-row overlay-toggle-row">
             <div class="setting-copy">
               <h2 id="overlayTitle" class="resource-section-title">悬浮语音按钮</h2>
@@ -197,43 +217,41 @@
               <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
             </label>
           </div>
-          <div id="overlayPreview" class="overlay-demo" role="group" aria-label="可交互的悬浮球预览">
-            <button id="overlayPreviewText" class="overlay-demo-text is-hidden" type="button" aria-live="polite" aria-label="点击复制识别文字">正在识别：你好，今天测试一下中英文混合识别。</button>
-            <span class="overlay-demo-orb-shell">
-              <button id="overlayPreviewOrb" class="overlay-demo-orb is-standby" type="button" aria-pressed="false" aria-label="悬浮球当前为待机，点击开始语音识别">
-                <svg id="overlayWaveform" class="overlay-waveform" viewBox="0 0 120 72" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-                  <defs>
-                    <linearGradient id="overlayWaveBackGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0" stop-color="#dbeafe" stop-opacity="0"></stop>
-                      <stop offset="0.22" stop-color="#bae6fd" stop-opacity="0.82"></stop>
-                      <stop offset="0.78" stop-color="#7dd3fc" stop-opacity="0.82"></stop>
-                      <stop offset="1" stop-color="#dbeafe" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="overlayWaveMiddleGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0" stop-color="#7dd3fc" stop-opacity="0"></stop>
-                      <stop offset="0.2" stop-color="#7dd3fc"></stop>
-                      <stop offset="0.52" stop-color="#22d3ee"></stop>
-                      <stop offset="0.82" stop-color="#38bdf8"></stop>
-                      <stop offset="1" stop-color="#7dd3fc" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="overlayWaveFrontGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0" stop-color="#3b82f6" stop-opacity="0"></stop>
-                      <stop offset="0.16" stop-color="#2563eb"></stop>
-                      <stop offset="0.5" stop-color="#06b6d4"></stop>
-                      <stop offset="0.84" stop-color="#2563eb"></stop>
-                      <stop offset="1" stop-color="#3b82f6" stop-opacity="0"></stop>
-                    </linearGradient>
-                  </defs>
-                  <path id="overlayWaveBack" class="overlay-wave-path overlay-wave-path-back" d="M0 36 L120 36"></path>
-                  <path id="overlayWaveMiddle" class="overlay-wave-path overlay-wave-path-middle" d="M0 36 L120 36"></path>
-                  <path id="overlayWaveFront" class="overlay-wave-path overlay-wave-path-front" d="M0 36 L120 36"></path>
-                </svg>
-              </button>
-            </span>
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">悬浮外观</p>
+              <h2 id="overlayAppearanceTitle">文字、大小与贴边</h2>
+            </div>
+          </div>
+          <p id="overlayEdgeHint" class="overlay-edge-hint">拖动悬浮球，松手后会自动贴近左侧或右侧边缘。</p>
+          <div id="overlayPreview" class="overlay-demo" data-side="right" style="--overlay-demo-opacity: .72; --overlay-demo-size: 64px" aria-label="可拖动并自动贴边的悬浮球预览" aria-describedby="overlayEdgeHint">
+            <div id="overlayPreviewText" class="overlay-demo-text" aria-live="polite">待机：点击悬浮球开始识别。</div>
+            <button id="overlayPreviewOrb" class="overlay-demo-orb" type="button" aria-pressed="false" aria-label="悬浮球当前为待机，点击开始录音">
+              <svg id="overlayWaveform" class="overlay-waveform" viewBox="0 0 120 72" aria-hidden="true" focusable="false">
+                <defs>
+                  <linearGradient id="overlayWaveGradientPrimary" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0" stop-color="#2563eb" stop-opacity="0"></stop>
+                    <stop offset="0.18" stop-color="#2563eb"></stop>
+                    <stop offset="0.52" stop-color="#06b6d4"></stop>
+                    <stop offset="0.82" stop-color="#2563eb"></stop>
+                    <stop offset="1" stop-color="#2563eb" stop-opacity="0"></stop>
+                  </linearGradient>
+                  <linearGradient id="overlayWaveGradientSoft" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0" stop-color="#38bdf8" stop-opacity="0"></stop>
+                    <stop offset="0.5" stop-color="#38bdf8" stop-opacity="0.76"></stop>
+                    <stop offset="1" stop-color="#38bdf8" stop-opacity="0"></stop>
+                  </linearGradient>
+                </defs>
+                <path id="overlayWaveBack" class="overlay-wave-path overlay-wave-path-back" d="M0 36 L120 36"></path>
+                <path id="overlayWaveMiddle" class="overlay-wave-path overlay-wave-path-middle" d="M0 36 L120 36"></path>
+                <path id="overlayWaveFront" class="overlay-wave-path overlay-wave-path-front" d="M0 36 L120 36"></path>
+              </svg>
+            </button>
           </div>
           <div class="setting-row setting-row-compact">
             <div class="setting-copy">
               <h3>显示识别文字框</h3>
+              <p>关闭后只显示悬浮球，识别结果仍会保存到记录。</p>
             </div>
             <label class="switch-control">
               <span class="visually-hidden">显示悬浮识别文字框</span>
@@ -253,6 +271,36 @@
           </div>
         </section>
 
+        <section class="settings-section test-mode-section" aria-labelledby="testModeTitle">
+          <div class="setting-row overlay-toggle-row">
+            <div class="setting-copy">
+              <h2 id="testModeTitle" class="resource-section-title">识别测试模式</h2>
+              <p>本地识别时保留实时初稿、第二次识别结果和对应录音，用于排查多字、漏字与替换错误。</p>
+            </div>
+            <label class="switch-control">
+              <span class="visually-hidden">开启识别测试模式</span>
+              <input id="testModeSwitch" type="checkbox">
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+          <div id="testModeDetails" class="test-mode-details is-hidden">
+            <div class="test-mode-retention" role="note">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5c0 4.7 3.1 8.1 7.5 10 4.4-1.9 7.5-5.3 7.5-10V6L12 3Z"></path><path d="M8.5 12h7M12 8.5v7"></path></svg>
+              <p><strong id="testStorageSummary">1 条测试记录 · 1.2 MB</strong><span>仅保存在本机。关闭后不再新增，已有资料不会自动删除。</span></p>
+            </div>
+            <ul class="test-mode-keeps" aria-label="测试模式保留内容">
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg><span>Zipformer 生成的实时初稿</span></li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg><span>第二次识别生成的结果</span></li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg><span>生成这两份文字的原始录音</span></li>
+            </ul>
+            <p id="testModeEngineNote" class="test-mode-engine-note">组合方案会保留两次识别结果；仅识别方案只保留文字和录音。</p>
+            <div class="test-mode-actions">
+              <button id="openTestRecordsButton" class="resource-action" type="button">查看测试记录</button>
+              <button id="clearTestDataButton" class="resource-action is-danger" type="button">清空测试资料</button>
+            </div>
+          </div>
+        </section>
+
         <section class="settings-section" aria-labelledby="diagnosticsTitle">
           <div class="section-heading">
             <div>
@@ -269,7 +317,7 @@
 
         <section class="privacy-note" aria-label="隐私说明">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5c0 4.7 3.1 8.1 7.5 10 4.4-1.9 7.5-5.3 7.5-10V6L12 3Z"></path><path d="m9 12 2 2 4-4"></path></svg>
-          <p>本地识别不会上传录音，应用也不保存录音。日志只记录运行状态，不记录识别正文。</p>
+          <p>本地识别不会上传录音。默认不保存录音；开启测试模式时，录音和测试文字仅保存在本机，可随时清空。</p>
         </section>
         <p id="versionText" class="version-text"></p>
       </section>
@@ -293,6 +341,71 @@
     </nav>
   </div>
 
+  <dialog id="testDetailDialog" class="test-detail-dialog" aria-labelledby="testDetailTitle">
+    <article class="test-detail-shell">
+      <header class="test-detail-header">
+        <button id="closeTestDetailButton" class="test-detail-icon-button" type="button" aria-label="返回识别记录">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+        </button>
+        <div>
+          <p>测试记录</p>
+          <h2 id="testDetailTitle">二次识别对照</h2>
+        </div>
+        <button id="deleteTestRecordButton" class="test-detail-icon-button is-danger" type="button" aria-label="删除这条测试记录">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"></path></svg>
+        </button>
+      </header>
+
+      <div class="test-detail-content">
+        <section class="test-audio-card" aria-labelledby="testAudioTitle">
+          <div class="test-audio-heading">
+            <div>
+              <p class="comparison-kicker">原始录音</p>
+              <h3 id="testAudioTitle">回听并核对文字</h3>
+            </div>
+            <span id="testAudioDurationBadge" class="test-audio-badge">00:12</span>
+          </div>
+          <div class="test-audio-player">
+            <button id="testAudioPlayButton" class="test-audio-play" type="button" aria-label="播放测试录音" aria-pressed="false">
+              <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6Z"></path></svg>
+              <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7v10M15 7v10"></path></svg>
+            </button>
+            <div class="test-audio-progress-wrap">
+              <input id="testAudioProgress" type="range" min="0" max="1000" value="0" aria-label="录音播放进度">
+              <div class="test-audio-times"><span id="testAudioCurrentTime">00:00</span><span id="testAudioTotalTime">00:12</span></div>
+            </div>
+          </div>
+          <p class="test-audio-note">预览使用模拟播放器；正式功能会播放这次识别实际保存的录音。</p>
+        </section>
+
+        <section class="test-decision-card" aria-labelledby="testDecisionTitle">
+          <span class="test-decision-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg></span>
+          <div><p id="testDecisionTitle">最终采用</p><strong id="testDecisionText">实时初稿</strong></div>
+          <span id="testDifferenceSummary" class="test-difference-summary">二次识别新增 9 字</span>
+        </section>
+
+        <section class="comparison-block comparison-before" aria-labelledby="beforeCalibrationTitle">
+          <div class="comparison-heading">
+            <div><p id="beforeCalibrationKicker" class="comparison-kicker">Zipformer 实时识别</p><h3 id="beforeCalibrationTitle">实时初稿</h3></div>
+            <button id="copyBeforeCalibrationButton" class="comparison-copy" type="button">复制</button>
+          </div>
+          <p id="beforeCalibrationText" class="comparison-text"></p>
+        </section>
+
+        <section id="afterCalibrationBlock" class="comparison-block comparison-after" aria-labelledby="afterCalibrationTitle">
+          <div class="comparison-heading">
+            <div><p id="afterCalibrationKicker" class="comparison-kicker">第二次完整识别</p><h3 id="afterCalibrationTitle">二次整段识别结果</h3></div>
+            <button id="copyAfterCalibrationButton" class="comparison-copy" type="button">复制</button>
+          </div>
+          <p id="afterCalibrationText" class="comparison-text"></p>
+          <div class="diff-legend" role="note"><span aria-hidden="true"></span><p><strong>第二次识别新增</strong>　请结合上方录音判断是否为多出的文字</p></div>
+        </section>
+
+        <p id="testRecordMeta" class="test-record-meta"></p>
+      </div>
+    </article>
+  </dialog>
+
   <dialog id="confirmDialog" class="confirm-dialog" aria-labelledby="confirmTitle">
     <div class="dialog-heading">
       <div class="dialog-icon" aria-hidden="true">
@@ -308,6 +421,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script src="app.js?v=20260819-49" defer></script>
+  <script src="app.js?v=20260821-08" defer></script>
 </body>
 </html>
