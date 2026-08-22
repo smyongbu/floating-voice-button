@@ -9,7 +9,7 @@ on:
         default: v0.16.0
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows:
@@ -91,12 +91,25 @@ jobs:
           (Get-FileHash -Algorithm SHA256 $zipName).Hash.ToLowerInvariant() | Set-Content -Encoding ASCII "$zipName.sha256"
           "RELEASE_ZIP=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: 上传云编译产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: 语点-Windows-${{ inputs.version }}
-          path: |
-            ${{ env.RELEASE_ZIP }}
-            ${{ env.RELEASE_ZIP }}.sha256
-          if-no-files-found: error
-          retention-days: 30
+      - name: 发布 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ inputs.version }}"
+          $notesFile = "release-notes.md"
+          @"
+          ## 语点 $version
+
+          - 支持 Streaming Paraformer 与 Zipformer 实时显示文字。
+          - 支持 Faster-Whisper Small、Qwen3-ASR 0.6B INT8 与 Qwen3-ASR 1.7B Q5_K_M 整段识别。
+          - 移除识别后通用文字校正，保留模型原始输出。
+          - 模型不进入 EXE 或 ZIP，统一放在程序旁的独立 models 文件夹。
+          - 压缩包附带 SHA-256 校验文件。
+          "@ | Set-Content -Encoding UTF8 $notesFile
+          gh release create $version `
+            $env:RELEASE_ZIP `
+            "$env:RELEASE_ZIP.sha256" `
+            --target $env:GITHUB_SHA `
+            --title "语点 $version" `
+            --notes-file $notesFile
