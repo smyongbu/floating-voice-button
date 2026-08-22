@@ -54,10 +54,10 @@ Zipformer、Paraformer 与 Qwen3-ASR 均使用 k2-fsa/sherpa-onnx 官方公开�
 
 ## 开发机同步模型
 
-开发机的模型放在被 Git 忽略的 `local-resources/models`：
+开发机的模型统一放在项目外的共享规范源 `O:\程序\共享模型仓库`。同步脚本通过相对于共同上级目录的路径定位，也可用环境变量 `VOICE_INPUT_MODEL_REPOSITORY` 或参数 `--source-root` 覆盖：
 
 ```text
-local-resources/models/
+O:\程序\共享模型仓库\
 ├─ zipformer-bilingual/
 ├─ paraformer/
 ├─ qwen3-asr-0.6b-int8/
@@ -71,7 +71,7 @@ local-resources/models/
 python scripts/同步安卓模型.py
 ```
 
-只有一台已授权手机时无需参数；多台设备可增加 `--serial <设备序列号>`。脚本先校验本机文件，再比较手机中的大小和 SHA-256，只传输新增或变化的文件。临时文件校验成功后才替换最终文件，并在全部文件就绪后写入版本标记；失败不会删除手机上仍可用的旧资源。
+只有一台已授权手机时无需参数；多台设备可增加 `--serial <设备序列号>`。临时使用其他仓库时可增加 `--source-root <模型仓库路径>`。脚本先校验本机文件，再比较手机中的大小和 SHA-256，只传输新增或变化的文件。临时文件校验成功后才替换最终文件，并在全部文件就绪后写入版本标记；失败不会删除手机上仍可用的旧资源。
 
 同步脚本日志分开保存在：
 

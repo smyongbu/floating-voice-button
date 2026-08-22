@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import queue
+import re
 import shutil
 import threading
 import time
@@ -12,33 +13,109 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from config_store import APP_DATA_DIR, REALTIME_MODEL_ID
+from config_store import (
+    APP_DATA_DIR,
+    DEFAULT_REALTIME_MODEL,
+    ZIPFORMER_REALTIME_MODEL,
+    normalize_realtime_model,
+)
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-MODEL_DIRECTORY_NAME = "sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01"
-MODEL_SOURCE_DIR = PROJECT_DIR / "models" / MODEL_DIRECTORY_NAME
-MODEL_LOCAL_DIR = APP_DATA_DIR / "models" / REALTIME_MODEL_ID
-MODEL_FILES = {
-    "model.int8.onnx": (
-        26_342_340,
-        "68c9c943840f7d9cf3e8a4970ba50f404feb5277f611fa82b7e72267786fa84a",
-    ),
-    "tokens.txt": (
-        13_366,
-        "6fed8c6c248516f38e7faa19404b57413e8ce259f1cbc1fa4aebc86eac32fdfd",
-    ),
-    "bbpe.model": (
-        255_180,
-        "503204e0690eff065e30d0e01898c9ab06d0e6dc376a741eb6846198f95b2f82",
-    ),
+MODEL_REPOSITORY_ENV = "VOICE_INPUT_MODEL_REPOSITORY"
+MODEL_REPOSITORY_ROOT = Path(
+    os.environ.get(
+        MODEL_REPOSITORY_ENV,
+        str(PROJECT_DIR.parents[1] / "共享模型仓库"),
+    )
+).expanduser()
+REALTIME_MODEL_SPECS: dict[str, dict[str, Any]] = {
+    DEFAULT_REALTIME_MODEL: {
+        "name": "Streaming Paraformer",
+        "directory": "sherpa-onnx-streaming-paraformer-bilingual-zh-en",
+        "factory": "from_paraformer",
+        "files": {
+            "encoder.int8.onnx": (
+                165_462_184,
+                "81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a",
+            ),
+            "decoder.int8.onnx": (
+                71_664_561,
+                "f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f",
+            ),
+            "tokens.txt": (
+                75_756,
+                "59aba8873a2ed1e122c25fee421e25f283b63290efbde85c1f01a853d83cb6e6",
+            ),
+        },
+        "description": "中英混说更准确",
+        "minimum": "4 核 64 位处理器、4 GB 内存",
+        "recommended": "6 核处理器、8 GB 内存",
+        "download_url": (
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+            "sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2"
+        ),
+    },
+    ZIPFORMER_REALTIME_MODEL: {
+        "name": "Zipformer",
+        "directory": "k2fsa-zipformer-bilingual-zh-en-t-exp32-int8-2024-03-20",
+        "factory": "from_transducer",
+        "files": {
+            "encoder-epoch-99-avg-1.int8.onnx": (
+                42_980_793,
+                "db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb",
+            ),
+            "decoder-epoch-99-avg-1.onnx": (
+                13_877_276,
+                "89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906",
+            ),
+            "joiner-epoch-99-avg-1.int8.onnx": (
+                3_228_485,
+                "bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9",
+            ),
+            "tokens.txt": (
+                56_317,
+                "a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3",
+            ),
+        },
+        "description": "响应更快，占用更低",
+        "minimum": "双核 64 位处理器、4 GB 内存",
+        "recommended": "4 核处理器、8 GB 内存",
+        "download_url": (
+            "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/"
+            "tree/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3"
+        ),
+    },
 }
-MODEL_DOWNLOAD_URL = (
-    "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
-    "sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01.tar.bz2"
-)
-MODEL_ARCHIVE_SHA256 = "b3b309f7ce4a737195fcc6963ea19b0653a7d3401580af5ae0d3e284cbb71f0b"
+
+# 保留旧常量名称，避免现有诊断和第三方来源测试失去固定清单入口。
+MODEL_DIRECTORY_NAME = str(REALTIME_MODEL_SPECS[ZIPFORMER_REALTIME_MODEL]["directory"])
+MODEL_SOURCE_DIR = MODEL_REPOSITORY_ROOT / MODEL_DIRECTORY_NAME
+MODEL_LOCAL_DIR = APP_DATA_DIR / "models" / ZIPFORMER_REALTIME_MODEL
+MODEL_FILES = REALTIME_MODEL_SPECS[ZIPFORMER_REALTIME_MODEL]["files"]
+MODEL_DOWNLOAD_URL = str(REALTIME_MODEL_SPECS[ZIPFORMER_REALTIME_MODEL]["download_url"])
 _END = object()
+_INTERNAL_TOKEN = re.compile(r"<[^>]+>")
+_WHITESPACE = re.compile(r"\s+")
+
+
+def clean_realtime_text(text: str) -> str:
+    return _WHITESPACE.sub(" ", _INTERNAL_TOKEN.sub(" ", str(text or ""))).strip()
+
+
+def combine_segments(existing: str, incoming: str) -> str:
+    left = clean_realtime_text(existing)
+    right = clean_realtime_text(incoming)
+    if not left:
+        return right
+    if not right:
+        return left
+    last = left[-1]
+    first = right[0]
+    needs_space = last.isalnum() and first.isalnum() and (
+        last.isascii() or first.isascii()
+    )
+    return f"{left}{' ' if needs_space else ''}{right}"
 
 
 def _sha256(path: Path) -> str:
@@ -59,33 +136,51 @@ def _valid_model_file(path: Path, size: int, digest: str) -> bool:
         return False
 
 
-def _complete_by_size(base_dir: Path) -> bool:
+def _complete_by_size(
+    base_dir: Path,
+    files: dict[str, tuple[int, str]] | None = None,
+) -> bool:
+    expected_files = MODEL_FILES if files is None else files
     try:
         return all(
             (base_dir / name).is_file() and (base_dir / name).stat().st_size == size
-            for name, (size, _digest) in MODEL_FILES.items()
+            for name, (size, _digest) in expected_files.items()
         )
     except OSError:
         return False
 
 
-def install_realtime_model_locally() -> Path:
+def _model_paths(model_id: str) -> tuple[str, dict[str, Any], Path, Path]:
+    normalized = normalize_realtime_model(model_id)
+    spec = REALTIME_MODEL_SPECS[normalized]
+    source_dir = MODEL_REPOSITORY_ROOT / str(spec["directory"])
+    local_dir = APP_DATA_DIR / "models" / normalized
+    return normalized, spec, source_dir, local_dir
+
+
+def install_realtime_model_locally(
+    model_id: str = DEFAULT_REALTIME_MODEL,
+) -> Path:
     """校验共享模型后原子复制到当前电脑，避免实时识别依赖网络读取。"""
+    normalized, spec, source_dir, local_dir = _model_paths(model_id)
+    files = spec["files"]
     if all(
-        _valid_model_file(MODEL_LOCAL_DIR / name, size, digest)
-        for name, (size, digest) in MODEL_FILES.items()
+        _valid_model_file(local_dir / name, size, digest)
+        for name, (size, digest) in files.items()
     ):
-        return MODEL_LOCAL_DIR
+        return local_dir
 
-    for name, (size, digest) in MODEL_FILES.items():
-        source = MODEL_SOURCE_DIR / name
+    for name, (size, digest) in files.items():
+        source = source_dir / name
         if not _valid_model_file(source, size, digest):
-            raise FileNotFoundError(f"实时中文模型文件缺失或校验失败：{name}")
+            raise FileNotFoundError(
+                f"实时模型 {normalized} 文件缺失或校验失败：{name}"
+            )
 
-    MODEL_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
-    for name, (size, digest) in MODEL_FILES.items():
-        source = MODEL_SOURCE_DIR / name
-        target = MODEL_LOCAL_DIR / name
+    local_dir.mkdir(parents=True, exist_ok=True)
+    for name, (size, digest) in files.items():
+        source = source_dir / name
+        target = local_dir / name
         if _valid_model_file(target, size, digest):
             continue
         temporary = target.parent / (
@@ -98,38 +193,49 @@ def install_realtime_model_locally() -> Path:
             os.replace(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
-    return MODEL_LOCAL_DIR
+    return local_dir
 
 
-def get_realtime_model_status() -> dict[str, object]:
-    source_ready = _complete_by_size(MODEL_SOURCE_DIR)
-    local_ready = _complete_by_size(MODEL_LOCAL_DIR)
+def get_realtime_model_status(
+    model_id: str = DEFAULT_REALTIME_MODEL,
+) -> dict[str, object]:
+    normalized, spec, source_dir, local_dir = _model_paths(model_id)
+    files = spec["files"]
+    source_ready = _complete_by_size(source_dir, files)
+    local_ready = _complete_by_size(local_dir, files)
     try:
         import sherpa_onnx
 
-        runtime_ready = hasattr(sherpa_onnx.OnlineRecognizer, "from_zipformer2_ctc")
+        runtime_ready = hasattr(sherpa_onnx.OnlineRecognizer, str(spec["factory"]))
     except (ImportError, AttributeError):
         runtime_ready = False
     available = bool((source_ready or local_ready) and runtime_ready)
     return {
-        "model_id": REALTIME_MODEL_ID,
-        "name": "Zipformer 中文实时轻量版 INT8",
+        "model_id": normalized,
+        "name": str(spec["name"]),
+        "description": str(spec["description"]),
         "available": available,
         "installed": source_ready or local_ready,
         "runtime_ready": runtime_ready,
-        "size_bytes": sum(item[0] for item in MODEL_FILES.values()),
+        "size_bytes": sum(item[0] for item in files.values()),
         "status": "已就绪" if available else "不可用",
         "status_message": (
-            "实时模型已就绪，可在讲话过程中显示文字。"
+            f"{spec['name']} 已就绪，可显示中文、英文和中英混说文字。"
             if available
-            else "实时模型文件或 sherpa-onnx 运行组件不完整。"
+            else f"{spec['name']} 文件或 sherpa-onnx 运行组件不完整。"
         ),
-        "minimum": "双核 64 位处理器、4 GB 内存",
-        "recommended": "4 核处理器、8 GB 内存",
+        "minimum": str(spec["minimum"]),
+        "recommended": str(spec["recommended"]),
         "gpu": "使用处理器运行，不需要显卡",
-        "download_url": MODEL_DOWNLOAD_URL,
-        "archive_sha256": MODEL_ARCHIVE_SHA256,
+        "download_url": str(spec["download_url"]),
     }
+
+
+def get_realtime_model_catalog() -> list[dict[str, object]]:
+    return [
+        get_realtime_model_status(DEFAULT_REALTIME_MODEL),
+        get_realtime_model_status(ZIPFORMER_REALTIME_MODEL),
+    ]
 
 
 @dataclass(frozen=True)
@@ -147,13 +253,76 @@ class RealtimeUpdate:
 
     @property
     def text(self) -> str:
-        return f"{self.stable_text}{self.partial_text}".strip()
+        return combine_segments(self.stable_text, self.partial_text)
+
+
+@dataclass(frozen=True)
+class FinalRecognition:
+    text: str
+    source: str
+
+
+def _meaningful_length(text: str) -> int:
+    return sum(character.isalnum() for character in text)
+
+
+def _textual_similarity(left: str, right: str) -> float:
+    first = "".join(character.lower() for character in left if character.isalnum())
+    second = "".join(character.lower() for character in right if character.isalnum())
+    if first == second:
+        return 1.0
+    if len(first) < 2 or len(second) < 2:
+        return 0.0
+    first_pairs = {first[index:index + 2] for index in range(len(first) - 1)}
+    second_pairs = {second[index:index + 2] for index in range(len(second) - 1)}
+    return 2.0 * len(first_pairs & second_pairs) / (
+        len(first_pairs) + len(second_pairs)
+    )
+
+
+def _is_english_heavy(text: str) -> bool:
+    latin = sum(character.isascii() and character.isalpha() for character in text)
+    han = sum("\u4e00" <= character <= "\u9fff" for character in text)
+    return latin >= 6 and latin > han * 2
+
+
+def _fragmented_english_score(text: str) -> int:
+    return sum(
+        len(word) == 1 and "b" <= word <= "z"
+        for word in text.lower().split()
+    )
+
+
+def choose_final_recognition(realtime: str, final_result: str) -> FinalRecognition:
+    """只比较两份模型输出；选中整段结果时保持其原始格式。"""
+    live = clean_realtime_text(realtime)
+    final_original = "" if final_result is None else str(final_result)
+    final = clean_realtime_text(final_original)
+    if not live and not final:
+        return FinalRecognition("", "none")
+    if not final:
+        return FinalRecognition(live, "realtime")
+    if not live:
+        return FinalRecognition(final_original, "final")
+
+    live_length = _meaningful_length(live)
+    final_length = _meaningful_length(final)
+    if final_length * 10 < live_length * 7 or final_length > live_length * 2 + 8:
+        return FinalRecognition(live, "realtime")
+    if _textual_similarity(live, final) < 0.42:
+        return FinalRecognition(live, "realtime")
+    if _is_english_heavy(live):
+        live_fragments = _fragmented_english_score(live)
+        final_fragments = _fragmented_english_score(final)
+        if final_fragments > live_fragments + 1 or final_length * 20 < live_length * 17:
+            return FinalRecognition(live, "realtime")
+    return FinalRecognition(final_original, "final")
 
 
 def _result_text(value: Any) -> str:
     if isinstance(value, str):
-        return value.strip()
-    return str(getattr(value, "text", "") or "").strip()
+        return clean_realtime_text(value)
+    return clean_realtime_text(getattr(value, "text", "") or "")
 
 
 class RealtimeRecognizer:
@@ -161,8 +330,9 @@ class RealtimeRecognizer:
 
     def __init__(
         self,
-        num_threads: int = 1,
+        num_threads: int = 2,
         *,
+        model_id: str = DEFAULT_REALTIME_MODEL,
         rule1_min_trailing_silence: float = 2.4,
         rule2_min_trailing_silence: float = 1.2,
         rule3_min_utterance_length: float = 20.0,
@@ -177,30 +347,62 @@ class RealtimeRecognizer:
         self.rule3_min_utterance_length = max(
             1.0, float(rule3_min_utterance_length)
         )
+        self.model_id = normalize_realtime_model(model_id)
         self.device_label = "CPU"
         self._recognizer: Any = None
         self._lock = threading.RLock()
+
+    @property
+    def model_name(self) -> str:
+        return str(REALTIME_MODEL_SPECS[self.model_id]["name"])
+
+    def select_model(self, model_id: str) -> bool:
+        """切换后续会话使用的模型；已经创建的会话继续安全使用旧实例。"""
+        normalized = normalize_realtime_model(model_id)
+        with self._lock:
+            if normalized == self.model_id:
+                return False
+            self.model_id = normalized
+            self._recognizer = None
+            return True
 
     def load(self) -> None:
         with self._lock:
             if self._recognizer is not None:
                 return
-            model_dir = install_realtime_model_locally()
+            model_id = self.model_id
+            spec = REALTIME_MODEL_SPECS[model_id]
+            model_dir = install_realtime_model_locally(model_id)
             import sherpa_onnx
 
-            self._recognizer = sherpa_onnx.OnlineRecognizer.from_zipformer2_ctc(
-                tokens=str(model_dir / "tokens.txt"),
-                model=str(model_dir / "model.int8.onnx"),
-                num_threads=self.num_threads,
-                sample_rate=16000,
-                feature_dim=80,
-                enable_endpoint_detection=True,
-                rule1_min_trailing_silence=self.rule1_min_trailing_silence,
-                rule2_min_trailing_silence=self.rule2_min_trailing_silence,
-                rule3_min_utterance_length=self.rule3_min_utterance_length,
-                decoding_method="greedy_search",
-                provider="cpu",
-            )
+            shared_options = {
+                "tokens": str(model_dir / "tokens.txt"),
+                "num_threads": self.num_threads,
+                "sample_rate": 16000,
+                "feature_dim": 80,
+                "enable_endpoint_detection": True,
+                "rule1_min_trailing_silence": self.rule1_min_trailing_silence,
+                "rule2_min_trailing_silence": self.rule2_min_trailing_silence,
+                "rule3_min_utterance_length": self.rule3_min_utterance_length,
+                "provider": "cpu",
+            }
+            if spec["factory"] == "from_paraformer":
+                self._recognizer = sherpa_onnx.OnlineRecognizer.from_paraformer(
+                    encoder=str(model_dir / "encoder.int8.onnx"),
+                    decoder=str(model_dir / "decoder.int8.onnx"),
+                    decoding_method="greedy_search",
+                    **shared_options,
+                )
+            else:
+                self._recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
+                    encoder=str(model_dir / "encoder-epoch-99-avg-1.int8.onnx"),
+                    decoder=str(model_dir / "decoder-epoch-99-avg-1.onnx"),
+                    joiner=str(model_dir / "joiner-epoch-99-avg-1.int8.onnx"),
+                    decoding_method="modified_beam_search",
+                    max_active_paths=4,
+                    model_type="zipformer",
+                    **shared_options,
+                )
 
     def create_session(
         self,
@@ -210,10 +412,12 @@ class RealtimeRecognizer:
         queue_size: int = 96,
         max_stable_segments: int | None = None,
     ) -> "RealtimeSession":
-        self.load()
+        with self._lock:
+            self.load()
+            recognizer = self._recognizer
         session = RealtimeSession(
             operation_id=operation_id,
-            recognizer=self._recognizer,
+            recognizer=recognizer,
             on_update=on_update,
             queue_size=queue_size,
             max_stable_segments=max_stable_segments,
@@ -429,7 +633,7 @@ class RealtimeSession:
                 self._cancelled.set()
         if not self._done.wait(max(0.1, float(timeout))):
             self.cancel()
-            raise TimeoutError("实时文字整理超时，已继续使用整段识别。")
+            raise TimeoutError("实时识别结束超时，已继续使用整段识别。")
         if self._error is not None:
             raise RuntimeError("实时识别暂时不可用，已继续使用整段识别。") from None
         if self._overloaded:

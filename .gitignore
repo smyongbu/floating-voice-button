@@ -5,3 +5,10 @@ __pycache__/
 logs/
 config.json
 models/
+共享模型仓库/
+build/
+dist/
+发布版本/
+测试素材/
+测试结果/
+应用图标/

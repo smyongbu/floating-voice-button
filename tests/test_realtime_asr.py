@@ -1,7 +1,10 @@
 import time
+import types
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import Mock, patch
 
+from config_store import DEFAULT_REALTIME_MODEL, ZIPFORMER_REALTIME_MODEL
 import realtime_asr
 
 
@@ -87,13 +90,112 @@ class RealtimeAsrTests(unittest.TestCase):
         self.assertEqual(recognizer.rule2_min_trailing_silence, 0.8)
         self.assertEqual(recognizer.rule3_min_utterance_length, 18.0)
 
-    def test_official_model_manifest_is_complete_and_pinned(self):
+    def test_official_model_manifests_are_complete_and_pinned(self):
+        paraformer_files = realtime_asr.REALTIME_MODEL_SPECS[
+            DEFAULT_REALTIME_MODEL
+        ]["files"]
+        zipformer_files = realtime_asr.REALTIME_MODEL_SPECS[
+            ZIPFORMER_REALTIME_MODEL
+        ]["files"]
         self.assertEqual(
-            set(realtime_asr.MODEL_FILES),
-            {"model.int8.onnx", "tokens.txt", "bbpe.model"},
+            set(paraformer_files),
+            {"encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt"},
         )
-        self.assertEqual(len(realtime_asr.MODEL_ARCHIVE_SHA256), 64)
-        self.assertTrue(realtime_asr.MODEL_DOWNLOAD_URL.startswith("https://github.com/k2-fsa/"))
+        self.assertEqual(
+            set(zipformer_files),
+            {
+                "encoder-epoch-99-avg-1.int8.onnx",
+                "decoder-epoch-99-avg-1.onnx",
+                "joiner-epoch-99-avg-1.int8.onnx",
+                "tokens.txt",
+            },
+        )
+        for model_id in (DEFAULT_REALTIME_MODEL, ZIPFORMER_REALTIME_MODEL):
+            spec = realtime_asr.REALTIME_MODEL_SPECS[model_id]
+            self.assertTrue(str(spec["download_url"]).startswith("https://"))
+            self.assertTrue(all(size > 0 and len(digest) == 64 for size, digest in spec["files"].values()))
+
+    def test_realtime_output_only_removes_internal_tokens_and_extra_spaces(self):
+        self.assertEqual(
+            realtime_asr.clean_realtime_text("<nuk>  HELLO WORLD 和 OPEN-AI "),
+            "HELLO WORLD 和 OPEN-AI",
+        )
+
+    def test_mixed_language_segments_have_readable_spacing(self):
+        self.assertEqual(
+            realtime_asr.combine_segments("请打开", "Wi-Fi"),
+            "请打开 Wi-Fi",
+        )
+        self.assertEqual(
+            realtime_asr.combine_segments("Openai", "明天下午"),
+            "Openai 明天下午",
+        )
+
+    def test_bad_final_result_keeps_realtime_but_related_final_result_wins(self):
+        rejected = realtime_asr.choose_final_recognition(
+            "The Quick Brown Fox Jumps Over The Lazy Dog",
+            "THE QUICK FOX",
+        )
+        accepted = realtime_asr.choose_final_recognition(
+            "Please Open Wifi And Search Open Ai",
+            "Please open Wi-Fi and search OpenAI",
+        )
+        self.assertEqual(rejected.source, "realtime")
+        self.assertEqual(accepted.source, "final")
+
+    def test_selected_final_result_preserves_model_case_punctuation_and_lines(self):
+        final_result = "第一段。\n\nPLEASE KEEP API, OpenAI!"
+        selected = realtime_asr.choose_final_recognition(
+            "第一段 PLEASE KEEP API OpenAI",
+            final_result,
+        )
+        self.assertEqual(selected.source, "final")
+        self.assertEqual(selected.text, final_result)
+
+    def test_streaming_paraformer_factory_uses_official_online_api(self):
+        model_dir = Path("C:/models/paraformer")
+        online = types.SimpleNamespace(
+            from_paraformer=Mock(return_value=object()),
+            from_transducer=Mock(return_value=object()),
+        )
+        runtime = types.SimpleNamespace(OnlineRecognizer=online)
+        with (
+            patch.dict("sys.modules", {"sherpa_onnx": runtime}),
+            patch.object(realtime_asr, "install_realtime_model_locally", return_value=model_dir),
+        ):
+            recognizer = realtime_asr.RealtimeRecognizer(model_id=DEFAULT_REALTIME_MODEL)
+            recognizer.load()
+
+        online.from_paraformer.assert_called_once()
+        online.from_transducer.assert_not_called()
+        kwargs = online.from_paraformer.call_args.kwargs
+        self.assertEqual(kwargs["encoder"], str(model_dir / "encoder.int8.onnx"))
+        self.assertEqual(kwargs["decoder"], str(model_dir / "decoder.int8.onnx"))
+        self.assertEqual(kwargs["decoding_method"], "greedy_search")
+
+    def test_zipformer_factory_uses_official_online_api(self):
+        model_dir = Path("C:/models/zipformer")
+        online = types.SimpleNamespace(
+            from_paraformer=Mock(return_value=object()),
+            from_transducer=Mock(return_value=object()),
+        )
+        runtime = types.SimpleNamespace(OnlineRecognizer=online)
+        with (
+            patch.dict("sys.modules", {"sherpa_onnx": runtime}),
+            patch.object(realtime_asr, "install_realtime_model_locally", return_value=model_dir),
+        ):
+            recognizer = realtime_asr.RealtimeRecognizer(model_id=ZIPFORMER_REALTIME_MODEL)
+            recognizer.load()
+
+        online.from_transducer.assert_called_once()
+        online.from_paraformer.assert_not_called()
+        kwargs = online.from_transducer.call_args.kwargs
+        self.assertEqual(
+            kwargs["encoder"],
+            str(model_dir / "encoder-epoch-99-avg-1.int8.onnx"),
+        )
+        self.assertEqual(kwargs["model_type"], "zipformer")
+        self.assertEqual(kwargs["decoding_method"], "modified_beam_search")
 
     def test_feed_is_non_blocking_and_finish_returns_final_update(self):
         updates = []

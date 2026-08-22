@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import shutil
+import sys
 import threading
 import uuid
 from array import array
@@ -12,16 +13,43 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from config_store import APP_DATA_DIR
+from model_download import (
+    ResourceVerificationError,
+    ensure_resource_verified,
+    is_resource_verified,
+)
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-MODEL_SOURCE_ROOT = PROJECT_DIR / "models"
+MODEL_REPOSITORY_ENV = "VOICE_INPUT_MODEL_REPOSITORY"
+
+
+def _default_model_repository() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "models"
+    return PROJECT_DIR.parents[1] / "共享模型仓库"
+
+
+MODEL_SOURCE_ROOT = Path(
+    os.environ.get(
+        MODEL_REPOSITORY_ENV,
+        str(_default_model_repository()),
+    )
+).expanduser()
 LOCAL_MODELS_DIR = APP_DATA_DIR / "models"
 
 SENSEVOICE_MODEL_ID = "sensevoice-small-int8"
 PARAFORMER_MODEL_ID = "paraformer-zh-small-int8"
 QWEN3_MODEL_ID = "qwen3-asr-0.6b-int8"
 FASTER_WHISPER_MODEL_ID = "faster-whisper-small"
+QWEN3_17_MODEL_ID = "qwen3-asr-1.7b-q5km"
+QWEN3_17_RESOURCE_ID = QWEN3_17_MODEL_ID
+QWEN3_17_FILENAME = "Qwen3-ASR-1.7B-Q5_K_M.gguf"
+MODEL_DISPLAY_ORDER = (
+    FASTER_WHISPER_MODEL_ID,
+    QWEN3_MODEL_ID,
+    QWEN3_17_MODEL_ID,
+)
 
 # 该目录只保存 JSON 可序列化的静态元数据。动态安装状态由
 # get_local_model_catalog() / get_local_model_status() 计算。
@@ -34,6 +62,8 @@ LOCAL_MODELS: dict[str, dict[str, Any]] = {
         "required_files": ["model.int8.onnx", "tokens.txt"],
         "size_bytes": 239_549_735,
         "capabilities": ["普通话", "粤语", "英语", "日语", "韩语", "情感与声音事件"],
+        "summary": "短句听写，也能识别情感和声音事件",
+        "language_support": "支持中文和英文，可识别中英混说",
         "hardware": {
             "minimum": "双核 64 位 CPU、4 GB 内存",
             "recommended": "4 核 CPU、8 GB 内存",
@@ -55,6 +85,8 @@ LOCAL_MODELS: dict[str, dict[str, Any]] = {
         "required_files": ["model.int8.onnx", "tokens.txt"],
         "size_bytes": 81_875_000,
         "capabilities": ["普通话", "中英混说", "河南话", "天津话", "四川话"],
+        "summary": "体积小、速度快，兼顾部分中文方言",
+        "language_support": "支持中文和英文，适合中英混说",
         "hardware": {
             "minimum": "双核 64 位 CPU、4 GB 内存",
             "recommended": "4 核 CPU、8 GB 内存",
@@ -93,6 +125,8 @@ LOCAL_MODELS: dict[str, dict[str, Any]] = {
             "30 多种语言",
             "歌词与说唱",
         ],
+        "summary": "兼顾多种语言、中文方言、歌词和说唱",
+        "language_support": "支持中文和英文，也支持多种语言与方言",
         "hardware": {
             "minimum": "4 核 64 位 CPU、8 GB 内存",
             "recommended": "6 核以上 CPU、16 GB 内存",
@@ -118,6 +152,8 @@ LOCAL_MODELS: dict[str, dict[str, Any]] = {
         "required_files": ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt"],
         "size_bytes": 486_000_000,
         "capabilities": ["普通话", "多语言识别", "语言自动检测", "时间戳"],
+        "summary": "多语言自动检测，并支持时间戳",
+        "language_support": "支持中文和英文；中英混说效果取决于录音内容",
         "hardware": {
             "minimum": "4 核 64 位 CPU、4 GB 内存",
             "recommended": "6 至 8 核 CPU、8 GB 内存",
@@ -134,6 +170,54 @@ LOCAL_MODELS: dict[str, dict[str, Any]] = {
         },
     },
 }
+
+_QWEN3_17_METADATA: dict[str, Any] = {
+    "id": QWEN3_17_MODEL_ID,
+    "name": "Qwen3-ASR 1.7B Q5_K_M",
+    "engine": "transcribe_cpp",
+    "storage_id": QWEN3_17_RESOURCE_ID,
+    "source_directory": (
+        "qwen3-asr-1.7b-gguf/"
+        "92282af1610a2db19d66f2bef1e260f5deca782d"
+    ),
+    "required_files": [QWEN3_17_FILENAME],
+    "file_sizes": {QWEN3_17_FILENAME: 1_517_290_464},
+    "size_bytes": 1_517_290_464,
+    "capabilities": [
+        "普通话",
+        "粤语",
+        "中英混说",
+        "30 种语言",
+        "自动语言检测",
+    ],
+    "summary": "识别能力更强，可自动检测 30 种语言",
+    "language_support": "支持中文和英文混说，并自动检测 30 种语言",
+    "hardware": {
+        "minimum": "4 核 64 位 CPU、12 GB 内存",
+        "recommended": "8 核 CPU、16 GB 内存，或支持 Vulkan 的显卡",
+        "gpu": "支持 Vulkan 的 Intel、AMD、NVIDIA 显卡；不可用时可使用 CPU",
+        "note": "Q5_K_M 约 1.52 GB。配置要求为工程估算；模型越大，首次加载和最终识别耗时越长。",
+    },
+    "license": "Apache-2.0（Qwen3-ASR 权重）；MIT（transcribe.cpp）",
+    "download": {
+        "page": "https://huggingface.co/handy-computer/Qwen3-ASR-1.7B-gguf",
+        "url": (
+            "https://huggingface.co/handy-computer/Qwen3-ASR-1.7B-gguf/"
+            "resolve/92282af1610a2db19d66f2bef1e260f5deca782d/"
+            "Qwen3-ASR-1.7B-Q5_K_M.gguf?download=true"
+        ),
+        "version": (
+            "handy-computer/Qwen3-ASR-1.7B-gguf@"
+            "92282af1610a2db19d66f2bef1e260f5deca782d"
+        ),
+        "size_bytes": 1_517_290_464,
+        "sha256": "034c557fe92ff8fcd9a9c041cbdaad347be0a86a58d3a348f63cf3f0180879d0",
+    },
+    "sha256": {
+        QWEN3_17_FILENAME: "034c557fe92ff8fcd9a9c041cbdaad347be0a86a58d3a348f63cf3f0180879d0",
+    },
+}
+LOCAL_MODELS[QWEN3_17_MODEL_ID] = deepcopy(_QWEN3_17_METADATA)
 
 # 旧设置面板和旧调用仍使用以下名称；保持其含义和可补丁性。
 MODEL_NAME = SENSEVOICE_MODEL_ID
@@ -156,9 +240,10 @@ def _model_directories(model_id: str) -> tuple[Path, Path]:
     metadata = _model_metadata(model_id)
     if metadata["id"] == MODEL_NAME:
         return Path(MODEL_SOURCE_DIR), Path(MODEL_LOCAL_DIR)
+    storage_id = str(metadata.get("storage_id") or metadata["id"])
     return (
         Path(MODEL_SOURCE_ROOT) / str(metadata["source_directory"]),
-        Path(LOCAL_MODELS_DIR) / str(metadata["id"]),
+        Path(LOCAL_MODELS_DIR) / storage_id,
     )
 
 
@@ -183,10 +268,13 @@ def _required_paths(model_id: str, base_dir: Path) -> list[Path]:
 
 def _missing_files(model_id: str, base_dir: Path) -> list[str]:
     metadata = _model_metadata(model_id)
+    expected_sizes = metadata.get("file_sizes") or {}
     missing: list[str] = []
     for relative, path in zip(metadata["required_files"], _required_paths(model_id, base_dir)):
         try:
-            valid = path.is_file() and path.stat().st_size > 0
+            size = path.stat().st_size if path.is_file() else 0
+            expected_size = int(expected_sizes.get(relative) or 0)
+            valid = size > 0 and (not expected_size or size == expected_size)
         except OSError:
             valid = False
         if not valid:
@@ -207,6 +295,14 @@ def _directory_size(model_id: str, base_dir: Path) -> int:
 
 def _runtime_status(metadata: dict[str, Any]) -> tuple[bool, str]:
     engine = str(metadata["engine"])
+    if engine == "transcribe_cpp":
+        if importlib.util.find_spec("transcribe_cpp") is None:
+            return False, "缺少 Qwen3-ASR 1.7B 运行组件 transcribe-cpp 0.2.1。"
+        try:
+            import transcribe_cpp  # noqa: F401
+        except Exception:
+            return False, "Qwen3-ASR 1.7B 运行组件无法加载或版本不匹配。"
+        return True, "transcribe.cpp 运行组件可用。"
     if engine == "faster_whisper":
         if importlib.util.find_spec("faster_whisper") is None:
             return False, "缺少可选运行组件 faster-whisper。"
@@ -224,6 +320,48 @@ def _runtime_status(metadata: dict[str, Any]) -> tuple[bool, str]:
     return True, "运行组件可用。"
 
 
+def _download_verification_spec(
+    model_id: str,
+    base_dir: Path,
+) -> dict[str, Any] | None:
+    """返回按需下载模型在指定目录中的固定校验清单。"""
+    metadata = _model_metadata(model_id)
+    download = metadata.get("download") or {}
+    version = str(download.get("version") or "").strip()
+    sha256 = str(download.get("sha256") or "").strip().lower()
+    if not version or not sha256:
+        return None
+    filename = str(metadata["required_files"][0])
+    return {
+        "resource_id": str(metadata.get("storage_id") or metadata["id"]),
+        "target_path": Path(base_dir) / _safe_relative_path(filename),
+        "version": version,
+        "size_bytes": int(download["size_bytes"]),
+        "sha256": sha256,
+    }
+
+
+def _ensure_download_resource_verified(model_id: str, base_dir: Path) -> None:
+    """在按需下载模型进入推理运行时前强制验证固定版本与 SHA-256。"""
+    verification = _download_verification_spec(model_id, base_dir)
+    if verification is None:
+        return
+    try:
+        ensure_resource_verified(
+            verification["resource_id"],
+            verification["target_path"],
+            verification["version"],
+            verification["size_bytes"],
+            verification["sha256"],
+        )
+    except ResourceVerificationError as exc:
+        metadata = _model_metadata(model_id)
+        raise RuntimeError(
+            f"本地模型“{metadata['name']}”未通过固定版本和 SHA-256 完整性校验：{exc}。"
+            "请在设置中点击“校验模型”重试；若仍失败，请删除模型后重新下载。"
+        ) from exc
+
+
 def get_local_model_status(model_id: str) -> dict[str, Any]:
     """返回单个模型的 JSON 可序列化元数据和真实安装状态。"""
     metadata = deepcopy(_model_metadata(model_id))
@@ -233,18 +371,42 @@ def get_local_model_status(model_id: str) -> dict[str, Any]:
     bundled = not source_missing
     cached_locally = not local_missing
     runtime_ready, runtime_message = _runtime_status(metadata)
+    verification = _download_verification_spec(metadata["id"], local_dir)
+    downloadable = verification is not None
+    verified = bool(
+        verification is not None
+        and cached_locally
+        and is_resource_verified(
+            verification["resource_id"],
+            verification["target_path"],
+            verification["version"],
+            verification["size_bytes"],
+            verification["sha256"],
+        )
+    )
     installed = bundled or cached_locally
-    available = installed and runtime_ready
+    usable_files = bundled or cached_locally and (not downloadable or verified)
+    available = usable_files and runtime_ready
 
-    if cached_locally and runtime_ready:
+    if cached_locally and (not downloadable or verified) and runtime_ready:
         status = "已安装"
-        status_message = "模型已安装到本机，可以离线使用。"
+        status_message = (
+            "模型已通过固定版本和 SHA-256 完整性校验，可以离线使用。"
+            if downloadable
+            else "模型已安装到本机，可以离线使用。"
+        )
     elif bundled and runtime_ready:
         status = "可安装"
         status_message = "模型已随软件提供，首次使用时会安全复制到本机。"
     elif not installed:
         status = "未安装"
         status_message = "模型文件尚未下载。"
+    elif downloadable and cached_locally and not verified:
+        status = "待校验"
+        status_message = (
+            "模型文件已存在，但没有匹配当前固定版本的 SHA-256 校验凭据。"
+            "请点击“校验模型”；若校验失败，请删除模型后重新下载。"
+        )
     else:
         status = "缺少组件"
         status_message = runtime_message
@@ -256,6 +418,7 @@ def get_local_model_status(model_id: str) -> dict[str, Any]:
             "available": available,
             "bundled": bundled,
             "cached_locally": cached_locally,
+            "verified": verified,
             "runtime_ready": runtime_ready,
             "runtime_message": runtime_message,
             "status": status,
@@ -268,14 +431,43 @@ def get_local_model_status(model_id: str) -> dict[str, Any]:
                 else _directory_size(metadata["id"], source_dir)
             ),
             "missing_files": [] if installed else source_missing,
+            "resource_id": str(metadata.get("storage_id") or metadata["id"]),
+            "downloadable": downloadable,
         }
     )
     return metadata
 
 
+def get_model_download_resource(model_id: str) -> dict[str, Any] | None:
+    """返回按需下载所需的内部资源描述；两个 1.7B 配置共享同一目标。"""
+    metadata = _model_metadata(model_id)
+    download = metadata.get("download") or {}
+    _source_dir, local_dir = _model_directories(metadata["id"])
+    verification = _download_verification_spec(metadata["id"], local_dir)
+    if verification is None:
+        return None
+    return {
+        "resource_id": verification["resource_id"],
+        "url": str(download["url"]),
+        "target_path": str(verification["target_path"]),
+        "version": verification["version"],
+        "size_bytes": verification["size_bytes"],
+        "sha256": verification["sha256"],
+    }
+
+
+def get_downloadable_model_resources() -> list[dict[str, Any]]:
+    resources: dict[str, dict[str, Any]] = {}
+    for model_id in LOCAL_MODELS:
+        incoming = get_model_download_resource(model_id)
+        if incoming is not None:
+            resources.setdefault(str(incoming["resource_id"]), incoming)
+    return list(resources.values())
+
+
 def get_local_model_catalog() -> list[dict[str, Any]]:
     """返回全部本地模型；结果可直接交给网页面板进行 JSON 序列化。"""
-    catalog = [get_local_model_status(model_id) for model_id in LOCAL_MODELS]
+    catalog = [get_local_model_status(model_id) for model_id in MODEL_DISPLAY_ORDER]
     json.dumps(catalog, ensure_ascii=False)
     return catalog
 
@@ -291,6 +483,7 @@ def install_model_locally(model_id: str = MODEL_NAME) -> Path:
     local_missing = _missing_files(metadata["id"], local_dir)
     if not local_missing and missing:
         # 已完成本机缓存后，即使共享目录临时离线也应继续可用。
+        _ensure_download_resource_verified(metadata["id"], local_dir)
         return local_dir
     if missing:
         missing_text = "、".join(missing)
@@ -302,6 +495,7 @@ def install_model_locally(model_id: str = MODEL_NAME) -> Path:
         target.stat().st_size == source.stat().st_size
         for source, target in zip(source_paths, target_paths)
     ):
+        _ensure_download_resource_verified(metadata["id"], local_dir)
         return local_dir
 
     local_dir.mkdir(parents=True, exist_ok=True)
@@ -324,6 +518,7 @@ def install_model_locally(model_id: str = MODEL_NAME) -> Path:
             os.replace(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
+    _ensure_download_resource_verified(metadata["id"], local_dir)
     return local_dir
 
 
@@ -357,6 +552,60 @@ def choose_provider(preference: str = "auto") -> tuple[str, str]:
     return "cpu", "CPU"
 
 
+def _choose_transcribe_device(preference: str) -> tuple[Any, str, str]:
+    requested = str(preference or "auto").strip().lower()
+    if requested not in ("auto", "cpu", "gpu"):
+        raise ValueError("本地识别设备只能选择自动、CPU 或 GPU。")
+    try:
+        import transcribe_cpp
+
+        devices = list(transcribe_cpp.backends())
+    except Exception as exc:
+        raise RuntimeError(
+            "Qwen3-ASR 1.7B 运行组件 transcribe-cpp 0.2.1 尚未正确安装。"
+        ) from exc
+    if not devices:
+        raise RuntimeError("transcribe.cpp 没有发现可用的 CPU 或 GPU 后端。")
+
+    def device_type(device: Any) -> str:
+        return str(getattr(device, "device_type", "") or "unknown").strip().lower()
+
+    def device_kind(device: Any) -> str:
+        return str(getattr(device, "kind", "") or "unknown").strip().lower()
+
+    cpu = next((item for item in devices if device_type(item) == "cpu"), None)
+    gpu_devices = [
+        item for item in devices
+        if device_type(item) in {"gpu", "igpu"}
+        and device_kind(item) not in {"accel", "cpu_accel"}
+    ]
+    priority = {"cuda": 0, "rocm": 1, "vulkan": 2, "metal": 3, "sycl": 4}
+    gpu_devices.sort(key=lambda item: priority.get(device_kind(item), 9))
+    if requested == "cpu":
+        if cpu is None:
+            raise RuntimeError("transcribe.cpp 的 CPU 后端不可用。")
+        return cpu, "CPU", "cpu"
+    if requested == "gpu":
+        if not gpu_devices:
+            raise RuntimeError("当前电脑没有可用的 transcribe.cpp Vulkan 或 CUDA 显卡后端。")
+        selected = gpu_devices[0]
+        kind = device_kind(selected)
+        label_prefix = "集成显卡" if device_type(selected) == "igpu" else "显卡"
+        return selected, f"{label_prefix}（{kind.upper()}）", kind
+    else:
+        if not gpu_devices and cpu is None:
+            raise RuntimeError("transcribe.cpp 没有发现可用的识别设备。")
+        return None, "自动选择（运行时确定）", "auto"
+
+
+def choose_model_device(model_id: str, preference: str = "auto") -> tuple[str, str]:
+    metadata = _model_metadata(model_id)
+    if str(metadata["engine"]) == "transcribe_cpp":
+        _device, label, provider = _choose_transcribe_device(preference)
+        return provider, label
+    return choose_provider(preference)
+
+
 class LocalModelRecognizer:
     """统一、线程安全的离线语音识别器。"""
 
@@ -372,7 +621,16 @@ class LocalModelRecognizer:
         self.device = str(device or "auto").strip().lower()
         self.preference = self.device
         self.num_threads = max(1, int(num_threads))
-        self.provider, self.device_label = choose_provider(self.device)
+        self._transcribe_device: Any = None
+        self._transcribe_run_lock: threading.RLock | None = None
+        if str(metadata["engine"]) == "transcribe_cpp":
+            (
+                self._transcribe_device,
+                self.device_label,
+                self.provider,
+            ) = _choose_transcribe_device(self.device)
+        else:
+            self.provider, self.device_label = choose_provider(self.device)
         self._recognizer: Any = None
         self._lock = threading.RLock()
 
@@ -382,6 +640,9 @@ class LocalModelRecognizer:
                 return
             model_dir = install_model_locally(self.model_id)
             engine = str(self.metadata["engine"])
+            if engine == "transcribe_cpp":
+                self._load_transcribe_cpp(model_dir)
+                return
             if engine == "faster_whisper":
                 self._load_faster_whisper(model_dir)
                 return
@@ -422,6 +683,45 @@ class LocalModelRecognizer:
             else:  # pragma: no cover
                 raise RuntimeError(f"暂不支持模型引擎：{engine}")
 
+    def _load_transcribe_cpp(self, model_dir: Path) -> None:
+        _ensure_download_resource_verified(self.model_id, model_dir)
+        try:
+            import transcribe_cpp
+        except Exception as exc:
+            raise RuntimeError(
+                "Qwen3-ASR 1.7B 需要 transcribe-cpp 0.2.1 运行组件。"
+            ) from exc
+        model_path = model_dir / QWEN3_17_FILENAME
+        model_options = (
+            {"backend": "auto"}
+            if self._transcribe_device is None
+            else {"device": self._transcribe_device}
+        )
+        self._recognizer = transcribe_cpp.Model(str(model_path), **model_options)
+        self._transcribe_run_lock = threading.RLock()
+        actual_device = getattr(self._recognizer, "device", None)
+        actual_type = str(getattr(actual_device, "device_type", "") or "").lower()
+        actual_kind = str(
+            getattr(actual_device, "kind", "") or self.provider
+        ).strip().lower()
+        if actual_type == "cpu" or actual_kind == "cpu":
+            self.provider = "cpu"
+            self.device_label = "CPU"
+        elif actual_kind:
+            self.provider = actual_kind
+            label_prefix = "集成显卡" if actual_type == "igpu" else "显卡"
+            self.device_label = f"{label_prefix}（{actual_kind.upper()}）"
+
+    def close(self) -> None:
+        """释放模型后端；切换配置后允许 Windows 删除共享 GGUF 文件。"""
+        with self._lock:
+            recognizer, self._recognizer = self._recognizer, None
+            self._transcribe_run_lock = None
+            self._transcribe_device = None
+        closer = getattr(recognizer, "close", None)
+        if callable(closer):
+            closer()
+
     def _load_faster_whisper(self, model_dir: Path) -> None:
         try:
             from faster_whisper import WhisperModel
@@ -457,6 +757,14 @@ class LocalModelRecognizer:
         self.load()
         samples = self._pcm16_samples(pcm)
         with self._lock:
+            if self.metadata["engine"] == "transcribe_cpp":
+                if int(sample_rate) != 16000:
+                    raise ValueError("Qwen3-ASR 1.7B 的 PCM 输入必须是 16000 Hz。")
+                run_lock = self._transcribe_run_lock or self._lock
+                with run_lock:
+                    with self._recognizer.session() as session:
+                        result = session.run(samples)
+                return str(getattr(result, "text", "") or "").strip()
             if self.metadata["engine"] == "faster_whisper":
                 if int(sample_rate) != 16000:
                     raise ValueError("Faster-Whisper 的 PCM 数组输入必须是 16000 Hz。")

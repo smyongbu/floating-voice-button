@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import threading
 from typing import Callable, Mapping, Protocol
 
 from config_store import (
@@ -108,6 +109,13 @@ class RecognitionRouter:
         self._local_factory = local_factory or _default_local_factory
         self._cloud_factory = cloud_factory or _default_cloud_factory
         self._local_recognizers: dict[tuple[str, str], _Recognizer] = {}
+        self._lock = threading.RLock()
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        with self._lock:
+            return self._closed
 
     @property
     def is_cloud(self) -> bool:
@@ -115,20 +123,27 @@ class RecognitionRouter:
 
     def _local_recognizer(self, model_id: str) -> _Recognizer:
         key = (model_id, self.local_preference)
-        recognizer = self._local_recognizers.get(key)
-        if recognizer is None:
-            try:
-                recognizer = self._local_factory(model_id, self.local_preference)
-            except RecognitionError:
-                raise
-            except Exception:
+        with self._lock:
+            if self._closed:
                 raise RecognitionError(
-                    "本地识别模型初始化失败，请检查模型是否完整。",
+                    "本地识别配置已经切换，请重新录音。",
                     "local",
                     f"local:{model_id}",
-                ) from None
-            self._local_recognizers[key] = recognizer
-        return recognizer
+                )
+            recognizer = self._local_recognizers.get(key)
+            if recognizer is None:
+                try:
+                    recognizer = self._local_factory(model_id, self.local_preference)
+                except RecognitionError:
+                    raise
+                except Exception:
+                    raise RecognitionError(
+                        "本地识别模型初始化失败，请检查模型是否完整。",
+                        "local",
+                        f"local:{model_id}",
+                    ) from None
+                self._local_recognizers[key] = recognizer
+            return recognizer
 
     def _credentials(self, provider_id: str) -> Mapping[str, str]:
         store = self._credential_store
@@ -180,6 +195,24 @@ class RecognitionRouter:
                 engine_id,
             ) from None
         return engine_id, str(getattr(recognizer, "device_label", "本地"))
+
+    def close(self) -> None:
+        """释放已加载的本地模型；不持有或关闭在线服务对象。"""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            recognizers = list(self._local_recognizers.values())
+            self._local_recognizers.clear()
+        for recognizer in recognizers:
+            closer = getattr(recognizer, "close", None)
+            if not callable(closer):
+                continue
+            try:
+                closer()
+            except Exception:
+                # 退出或切换配置时，释放异常不能中断主流程。
+                pass
 
     def _run_local(
         self,

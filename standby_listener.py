@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from difflib import SequenceMatcher
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -38,18 +39,31 @@ def normalize_standby_control_phrase(text: str) -> str:
     )
 
 
-def classify_standby_control_phrase(text: str) -> str | None:
-    """仅把完整端点短句归类为开始或结束，正文中的同名词不会命中。"""
+def standby_control_match(text: str) -> tuple[str | None, int]:
+    """返回最接近的控制命令及文字匹配置信度（不是声学概率）。"""
     normalized = normalize_standby_control_phrase(text)
-    if normalized in START_CONTROL_WORDS:
-        return "开始"
-    if normalized in END_CONTROL_WORDS:
-        return "结束"
-    return None
+    if not normalized:
+        return None, 0
+    candidates = [("开始", word) for word in START_CONTROL_WORDS]
+    candidates.extend(("结束", word) for word in END_CONTROL_WORDS)
+    command, _word, score = max(
+        (
+            (command, word, round(SequenceMatcher(None, normalized, word).ratio() * 100))
+            for command, word in candidates
+        ),
+        key=lambda item: item[2],
+    )
+    return command, int(score)
+
+
+def classify_standby_control_phrase(text: str, confidence_threshold: int = 80) -> str | None:
+    """仅把完整端点短句归类为开始或结束，正文中的同名词不会命中。"""
+    command, score = standby_control_match(text)
+    return command if score >= max(70, min(100, int(confidence_threshold))) else None
 
 
 class StandbyVoiceListener:
-    """纯 Python Zipformer 状态机；音频必须由外部唯一麦克风流传入。"""
+    """纯 Python 流式识别状态机；音频必须由外部唯一麦克风流传入。"""
 
     def __init__(
         self,
@@ -59,6 +73,7 @@ class StandbyVoiceListener:
         on_update: Callable[[RealtimeUpdate], None],
         on_ignored: Callable[[int], None],
         on_error: Callable[[str], None],
+        confidence_threshold: int = 80,
     ) -> None:
         self.recognizer = recognizer
         self.on_word = on_word
@@ -66,6 +81,7 @@ class StandbyVoiceListener:
         self.on_update = on_update
         self.on_ignored = on_ignored
         self.on_error = on_error
+        self.confidence_threshold = max(70, min(100, int(confidence_threshold)))
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._generation = 0
@@ -225,9 +241,9 @@ class StandbyVoiceListener:
             self._state = "failed"
             self._condition.notify_all()
         message = (
-            "旧 Zipformer 解码线程没有按时退出。"
+            "旧实时模型解码线程没有按时退出。"
             if isinstance(error, TimeoutError)
-            else f"旧 Zipformer 解码会话没有安全退出：{type(error).__name__}"
+            else f"旧实时模型解码会话没有安全退出：{type(error).__name__}"
         )
         try:
             self.on_error(message)
@@ -274,7 +290,7 @@ class StandbyVoiceListener:
         endpoint_flag = getattr(update, "endpoint_reached", None)
         endpoint_reached = bool(endpoint_text) if endpoint_flag is None else bool(endpoint_flag)
         command = (
-            classify_standby_control_phrase(endpoint_text)
+            classify_standby_control_phrase(endpoint_text, self.confidence_threshold)
             if endpoint_reached and endpoint_text
             else None
         )
@@ -447,7 +463,7 @@ class StandbyVoiceListener:
         if callable(wait_closed):
             try:
                 if not wait_closed(0.75):
-                    return TimeoutError("旧 Zipformer 解码线程没有按时退出。")
+                    return TimeoutError("旧实时模型解码线程没有按时退出。")
             except Exception as exc:
                 return exc
         else:
@@ -455,7 +471,7 @@ class StandbyVoiceListener:
             if done is not None and hasattr(done, "wait"):
                 try:
                     if not done.wait(0.75):
-                        return TimeoutError("旧 Zipformer 解码线程没有按时退出。")
+                        return TimeoutError("旧实时模型解码线程没有按时退出。")
                 except Exception as exc:
                     return exc
         return None

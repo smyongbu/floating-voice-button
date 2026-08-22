@@ -9,6 +9,7 @@ from standby_listener import (
     StandbyVoiceListener,
     classify_standby_control_phrase,
     normalize_standby_control_phrase,
+    standby_control_match,
 )
 
 
@@ -283,6 +284,9 @@ class StandbyListenerTests(unittest.TestCase):
         self.assertEqual(classify_standby_control_phrase("開始說話！"), "开始")
         self.assertEqual(classify_standby_control_phrase("停止录音。"), "结束")
         self.assertIsNone(classify_standby_control_phrase("现在开始整理正文"))
+        self.assertEqual(standby_control_match("开始"), ("开始", 100))
+        self.assertEqual(classify_standby_control_phrase("开始了", 80), "开始")
+        self.assertIsNone(classify_standby_control_phrase("开始了", 90))
 
 if __name__ == "__main__":
     unittest.main()

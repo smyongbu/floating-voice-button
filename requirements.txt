@@ -4,3 +4,4 @@ pywebview==6.2.1
 sherpa-onnx>=1.13,<1.14
 websocket-client>=1.8,<2
 faster-whisper>=1.2,<2
+transcribe-cpp @ https://github.com/handy-computer/transcribe.cpp/releases/download/v0.2.1/transcribe_cpp-0.2.1-py3-none-any.whl#sha256=3a53af2c17b384cb7c6867ff867f59664adeb381d765133e48ce2a1a45f90856

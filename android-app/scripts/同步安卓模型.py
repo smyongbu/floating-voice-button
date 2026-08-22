@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -73,8 +74,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--source-root",
         type=Path,
-        default=app_root / "local-resources" / "models",
-        help="本机模型根目录",
+        default=Path(
+            os.environ.get(
+                "VOICE_INPUT_MODEL_REPOSITORY",
+                str(app_root.parents[2] / "共享模型仓库"),
+            )
+        ).expanduser(),
+        help="共享模型仓库根目录；可用 VOICE_INPUT_MODEL_REPOSITORY 覆盖",
     )
     parser.add_argument(
         "--manifest",
@@ -146,6 +152,49 @@ def load_resources(path: Path) -> list[Resource]:
             )
         result.append(Resource(resource_id, version, tuple(files)))
     return result
+
+
+def load_repository_index(source_root: Path) -> dict[tuple[int, str], Path]:
+    manifest_path = source_root / "模型清单.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if data.get("schemaVersion") != 1:
+        raise ValueError("不支持的共享模型仓库清单版本。")
+    index: dict[tuple[int, str], Path] = {}
+    for model in data.get("models", []):
+        directory = model.get("directory") or model.get("relativeDirectory")
+        if not directory:
+            continue
+        for raw_file in model.get("files", []):
+            relative_path = str(raw_file["path"])
+            candidate = (source_root / str(directory) / Path(relative_path)).resolve()
+            try:
+                candidate.relative_to(source_root)
+            except ValueError as error:
+                raise ValueError(f"共享仓库模型路径越界：{relative_path}") from error
+            key = (int(raw_file["bytes"]), str(raw_file["sha256"]).lower())
+            index.setdefault(key, candidate)
+    return index
+
+
+def resolve_local_file(
+    source_root: Path,
+    resource: Resource,
+    spec: ResourceFile,
+    repository_index: dict[tuple[int, str], Path],
+) -> Path:
+    legacy_path = (source_root / resource.resource_id / Path(spec.relative_path)).resolve()
+    try:
+        legacy_path.relative_to(source_root)
+    except ValueError as error:
+        raise ValueError(f"本机模型路径越界：{spec.relative_path}") from error
+    if legacy_path.is_file():
+        return legacy_path
+    candidate = repository_index.get((spec.bytes, spec.sha256))
+    if candidate is None:
+        raise FileNotFoundError(
+            f"共享模型仓库中缺少资源：{resource.resource_id}/{spec.relative_path}"
+        )
+    return candidate
 
 
 def run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -302,17 +351,14 @@ def sync_resource(
     serial: str,
     source_root: Path,
     resource: Resource,
+    repository_index: dict[tuple[int, str], Path],
     logger: SplitLogger,
     operation: str,
 ) -> tuple[int, int]:
     copied = 0
     skipped = 0
     for spec in resource.files:
-        local_path = (source_root / resource.resource_id / Path(spec.relative_path)).resolve()
-        try:
-            local_path.relative_to(source_root.resolve())
-        except ValueError as error:
-            raise ValueError(f"本机模型路径越界：{spec.relative_path}") from error
+        local_path = resolve_local_file(source_root, resource, spec, repository_index)
         validate_local_file(local_path, spec)
         remote_path = f"{REMOTE_ROOT}/{resource.resource_id}/{resource.version}/{spec.relative_path}"
         remote = remote_file_info(adb, serial, remote_path)
@@ -356,12 +402,14 @@ def main() -> int:
         copied_total = 0
         skipped_total = 0
         source_root = args.source_root.resolve()
+        repository_index = load_repository_index(source_root)
         for resource in resources:
             copied, skipped = sync_resource(
                 args.adb,
                 serial,
                 source_root,
                 resource,
+                repository_index,
                 logger,
                 operation,
             )

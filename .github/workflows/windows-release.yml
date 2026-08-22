@@ -1,0 +1,94 @@
+name: Windows 编译
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 发布版本号
+        required: true
+        default: v0.16.0
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller==6.15.0
+
+      - name: 运行测试
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+
+      - name: 编译语点
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onedir --windowed `
+            --name "语点" `
+            --add-data "web;web" `
+            --add-data "assets;assets" `
+            --collect-all webview `
+            --collect-all sherpa_onnx `
+            --collect-all faster_whisper `
+            --collect-all ctranslate2 `
+            --collect-all transcribe_cpp `
+            app.py
+
+      - name: 创建独立模型文件夹
+        shell: pwsh
+        run: |
+          $modelDir = Join-Path $PWD "dist\语点\models"
+          New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
+          @"
+          此文件夹用于单独存放语音识别模型，模型不会编译进语点.exe。
+          也可以设置 VOICE_INPUT_MODEL_REPOSITORY，让程序读取其他模型仓库。
+          "@ | Set-Content -Encoding UTF8 (Join-Path $modelDir "模型放置说明.txt")
+
+      - name: 检查发布包不含模型
+        shell: pwsh
+        run: |
+          $modelExtensions = @(".onnx", ".ort", ".gguf", ".safetensors", ".pt", ".pth", ".ckpt")
+          $forbidden = Get-ChildItem -LiteralPath "dist\语点" -Recurse -File | Where-Object {
+            $modelExtensions -contains $_.Extension.ToLowerInvariant() -or
+            ($_.Extension -eq ".bin" -and $_.Name -match "^(encoder|decoder|joiner|model|tokens)\.bin$")
+          }
+          if ($forbidden) {
+            $forbidden.FullName
+            throw "发布包中发现模型文件，已停止发布。"
+          }
+
+      - name: 生成压缩包和校验值
+        shell: pwsh
+        run: |
+          $version = "${{ inputs.version }}"
+          $zipName = "语点-Windows-$version.zip"
+          Compress-Archive -Path "dist\语点" -DestinationPath $zipName -CompressionLevel Optimal
+          (Get-FileHash -Algorithm SHA256 $zipName).Hash.ToLowerInvariant() | Set-Content -Encoding ASCII "$zipName.sha256"
+          "RELEASE_ZIP=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: 上传云编译产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: 语点-Windows-${{ inputs.version }}
+          path: |
+            ${{ env.RELEASE_ZIP }}
+            ${{ env.RELEASE_ZIP }}.sha256
+          if-no-files-found: error
+          retention-days: 30

@@ -36,8 +36,8 @@ class RecognitionRouterTests(unittest.TestCase):
         result = router.transcribe_pcm16(bytes(32000), 16000)
 
         self.assertEqual(result.text, "识别结果")
-        self.assertEqual(result.actual_engine, "local:sensevoice-small-int8")
-        local_factory.assert_called_once_with("sensevoice-small-int8", "auto")
+        self.assertEqual(result.actual_engine, "local:faster-whisper-small")
+        local_factory.assert_called_once_with("faster-whisper-small", "auto")
         credential_store.read.assert_not_called()
         credential_store.load.assert_not_called()
         cloud_factory.assert_not_called()
@@ -93,8 +93,8 @@ class RecognitionRouterTests(unittest.TestCase):
         self.assertEqual(result.text, "本地回退结果")
         self.assertTrue(result.fallback_used)
         self.assertEqual(result.requested_engine, "cloud:volcengine")
-        self.assertEqual(result.actual_engine, "local:paraformer-zh-small-int8")
-        local_factory.assert_called_once_with("paraformer-zh-small-int8", "cpu")
+        self.assertEqual(result.actual_engine, "local:faster-whisper-small")
+        local_factory.assert_called_once_with("faster-whisper-small", "cpu")
 
     def test_non_transient_cloud_failures_never_use_local_fallback(self):
         for category in ("authentication", "quota", "parameter", "service"):

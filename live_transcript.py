@@ -53,6 +53,17 @@ class MONITORINFO(ctypes.Structure):
     ]
 
 
+user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+user32.MonitorFromWindow.restype = wintypes.HMONITOR
+user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
+user32.GetMonitorInfoW.restype = wintypes.BOOL
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.restype = wintypes.BOOL
+
+
+HGDI_ERROR = ctypes.c_void_p(-1).value
+
+
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     for path in (
         r"C:\Windows\Fonts\msyh.ttc",
@@ -202,24 +213,40 @@ class LiveTranscriptWindow:
         x, y = self._position()
         image = self._image(text)
         pixels = premultiplied_bgra(image)
-        screen_dc = user32.GetDC(None)
-        memory_dc = gdi32.CreateCompatibleDC(screen_dc)
-        bitmap_info = BITMAPINFO()
-        bitmap_info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        bitmap_info.bmiHeader.biWidth = self.width
-        bitmap_info.bmiHeader.biHeight = -self.height
-        bitmap_info.bmiHeader.biPlanes = 1
-        bitmap_info.bmiHeader.biBitCount = 32
-        bitmap_info.bmiHeader.biCompression = 0
-        bitmap_info.bmiHeader.biSizeImage = len(pixels)
-        bits = ctypes.c_void_p()
-        bitmap = gdi32.CreateDIBSection(
-            screen_dc, ctypes.byref(bitmap_info), 0, ctypes.byref(bits), None, 0
-        )
-        if not bitmap or not bits.value:
-            raise ctypes.WinError()
-        previous = gdi32.SelectObject(memory_dc, bitmap)
+        screen_dc = None
+        memory_dc = None
+        bitmap = None
+        previous = None
+        bitmap_selected = False
         try:
+            screen_dc = user32.GetDC(None)
+            if not screen_dc:
+                raise ctypes.WinError()
+
+            memory_dc = gdi32.CreateCompatibleDC(screen_dc)
+            if not memory_dc:
+                raise ctypes.WinError()
+
+            bitmap_info = BITMAPINFO()
+            bitmap_info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            bitmap_info.bmiHeader.biWidth = self.width
+            bitmap_info.bmiHeader.biHeight = -self.height
+            bitmap_info.bmiHeader.biPlanes = 1
+            bitmap_info.bmiHeader.biBitCount = 32
+            bitmap_info.bmiHeader.biCompression = 0
+            bitmap_info.bmiHeader.biSizeImage = len(pixels)
+            bits = ctypes.c_void_p()
+            bitmap = gdi32.CreateDIBSection(
+                screen_dc, ctypes.byref(bitmap_info), 0, ctypes.byref(bits), None, 0
+            )
+            if not bitmap or not bits.value:
+                raise ctypes.WinError()
+
+            previous = gdi32.SelectObject(memory_dc, bitmap)
+            if not previous or previous == HGDI_ERROR:
+                raise ctypes.WinError()
+            bitmap_selected = True
+
             ctypes.memmove(bits.value, pixels, len(pixels))
             destination = wintypes.POINT(x, y)
             source = wintypes.POINT(0, 0)
@@ -238,10 +265,20 @@ class LiveTranscriptWindow:
             ):
                 raise ctypes.WinError()
         finally:
-            gdi32.SelectObject(memory_dc, previous)
-            gdi32.DeleteObject(bitmap)
-            gdi32.DeleteDC(memory_dc)
-            user32.ReleaseDC(None, screen_dc)
+            try:
+                if bitmap_selected:
+                    gdi32.SelectObject(memory_dc, previous)
+            finally:
+                try:
+                    if bitmap:
+                        gdi32.DeleteObject(bitmap)
+                finally:
+                    try:
+                        if memory_dc:
+                            gdi32.DeleteDC(memory_dc)
+                    finally:
+                        if screen_dc:
+                            user32.ReleaseDC(None, screen_dc)
         user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
 
     def show(self, text: str = "正在聆听…") -> None:

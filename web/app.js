@@ -1,21 +1,127 @@
 "use strict";
 
+const PREVIEW_MODE = new URLSearchParams(window.location.search).get("preview") === "1";
+let previewDownloadState = "not_started";
+let previewDownloadPercent = 0;
+let previewRealtimeModel = "streaming-paraformer-bilingual-zh-en";
+const previewApi = {
+  async get_initial_state() {
+    const modelDetails = [
+      [486000000, "4 核 64 位 CPU、4 GB 内存", "6 至 8 核 CPU、8 GB 内存", "CPU 可用；GPU 需要 NVIDIA CUDA 12 和 cuDNN 9"],
+      [982000000, "4 核 64 位 CPU、8 GB 内存", "6 核以上 CPU、16 GB 内存", "不需要显卡；NVIDIA CUDA 可选"],
+      [1517290464, "4 核 64 位 CPU、12 GB 内存", "8 核 CPU、16 GB 内存，或支持 Vulkan 的显卡", "支持 Intel、AMD、NVIDIA Vulkan；不可用时回退 CPU"],
+    ];
+    const localModels = [
+      ["faster-whisper-small", "Faster-Whisper Small", "多语言自动检测，并支持时间戳"],
+      ["qwen3-asr-0.6b-int8", "Qwen3-ASR 0.6B INT8", "兼顾多种语言、中文方言、歌词和说唱"],
+      ["qwen3-asr-1.7b-q5km", "Qwen3-ASR 1.7B Q5_K_M", "识别能力更强，可自动检测 30 种语言"],
+    ].map(([model_id, name, summary], index) => {
+      const [size_bytes, minimum, recommended, gpu] = modelDetails[index];
+      const downloadable = model_id.startsWith("qwen3-asr-1.7b-q5km");
+      const downloadComplete = downloadable && previewDownloadState === "completed";
+      return {
+        model_id, name, summary, size_bytes, minimum, recommended, gpu,
+        language_support: "中文、英文及中英混说",
+        size_on_disk_bytes: downloadable && !downloadComplete ? 0 : size_bytes,
+        available: !downloadable || downloadComplete,
+        downloadable,
+        status: downloadable && !downloadComplete ? "可下载" : "已安装",
+        status_message: downloadable ? "模型约 1.52 GB，下载并校验后可使用。" : "已安装，可直接使用。",
+        install_size: downloadable ? "约 1.52 GB" : "",
+        resource_status: downloadable ? {
+          state: previewDownloadState, installed: downloadComplete, target_exists: downloadComplete,
+          verified: downloadComplete,
+          downloaded_bytes: Math.round(1517290464 * previewDownloadPercent / 100),
+          installed_bytes: downloadComplete ? 1517290464 : 0,
+          total_bytes: 1517290464, percent: previewDownloadPercent,
+          version: "handy-computer/Qwen3-ASR-1.7B-gguf@92282af1",
+        } : null,
+      };
+    });
+    return {
+      ok: true,
+      data: {
+        appearance: {
+          color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space",
+          standby_enabled: false, standby_confidence: 80,
+          live_transcript_visible: true, auto_paste_enabled: true,
+          default_color: "#2563EB", default_opacity: 100,
+          default_hotkey: "Ctrl+Alt+Space", default_standby_enabled: false,
+          default_standby_confidence: 80,
+          default_live_transcript_visible: true, default_auto_paste_enabled: true,
+        },
+        history: { available: true, entries: [], signature: [0, 0] },
+        model: {
+          engine_id: "local:qwen3-asr-1.7b-q5km", fallback_model: "faster-whisper-small",
+          preference: "auto", realtime_model: previewRealtimeModel,
+          realtime_models: [
+            {
+              model_id: "streaming-paraformer-bilingual-zh-en",
+              name: "Streaming Paraformer",
+              available: true,
+            },
+            {
+              model_id: "zipformer-bilingual-zh-en-exp32-int8",
+              name: "Zipformer",
+              available: true,
+            },
+          ],
+          local_models: localModels, providers: [],
+        },
+      },
+    };
+  },
+  async manage_local_model_resource(_modelId, action) {
+    if (action === "start") previewDownloadState = "downloading";
+    if (action === "pause") previewDownloadState = "paused";
+    if (action === "delete") {
+      previewDownloadState = "not_started";
+      previewDownloadPercent = 0;
+    }
+    if (action === "status" && previewDownloadState === "downloading") {
+      previewDownloadPercent = Math.min(100, previewDownloadPercent + 18);
+      if (previewDownloadPercent >= 100) previewDownloadState = "completed";
+    }
+    const response = await this.get_initial_state();
+    return { ok: true, data: response.data.model, message: "模型状态已更新。" };
+  },
+  async save_recognition_settings(engineId, fallbackModel, preference, realtimeModel) {
+    previewRealtimeModel = realtimeModel;
+    const response = await this.get_initial_state();
+    Object.assign(response.data.model, {
+      engine_id: engineId,
+      fallback_model: fallbackModel,
+      preference,
+      realtime_model: realtimeModel,
+    });
+    return { ok: true, data: response.data.model, message: "识别设置已保存并应用。" };
+  },
+};
+
+function getLocalApi() {
+  return PREVIEW_MODE ? previewApi : window.pywebview?.api;
+}
+
 const COLOR_PATTERN = /^#[0-9A-F]{6}$/;
+const DEFAULT_REALTIME_MODEL = "streaming-paraformer-bilingual-zh-en";
 
 const state = {
-  saved: { color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space", standby: false },
-  draft: { color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space", standby: false },
-  defaults: { color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space", standby: false },
+  saved: { color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
+  draft: { color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
+  defaults: { color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
   appearanceBusy: false,
   model: {
-    engine_id: "local:sensevoice-small-int8",
-    recognition_mode: "realtime",
-    fallback_model: "sensevoice-small-int8",
+    engine_id: "local:faster-whisper-small",
+    realtime_model: DEFAULT_REALTIME_MODEL,
+    realtime_models: [],
+    fallback_model: "faster-whisper-small",
     preference: "auto",
     local_models: [],
     providers: [],
   },
   modelBusy: false,
+  testBusy: false,
+  controlTestActive: false,
   localEngineId: null,
   onlineEngineId: null,
   entries: [],
@@ -28,6 +134,7 @@ const state = {
   confirmFocus: null,
   searchTimer: null,
   pollTimer: null,
+  modelResourceTimer: null,
   toastTimer: null,
   bridgeAttempts: 0,
 };
@@ -35,23 +142,28 @@ const state = {
 const elements = {};
 let rootRule = null;
 let bridgeStarted = false;
+let recordingPreviewFrame = null;
+let recordingPreviewLastTime = 0;
+let recordingPreviewPhase = 0;
+let recordingMotionQuery = null;
 
 function collectElements() {
   const ids = [
     "appearanceView", "localModelView", "onlineModelView", "historyView", "saveState", "colorPicker", "colorText",
     "colorError", "opacityRange", "opacityOutput", "hotkeyInput", "hotkeyError",
-    "hotkeyTestButton", "hotkeyStatus", "standbyToggle",
+    "hotkeyTestButton", "hotkeyStatus", "standbyToggle", "transcriptToggle", "autoPasteToggle",
+    "standbyConfidence", "standbyConfidenceValue", "controlWordTestButton", "controlWordTestStatus",
     "resetButton", "saveButton",
-    "navHistoryCount", "clearButton", "historySearch", "historyCount",
+    "navHistoryCount", "clearButton", "copyAllButton", "historySearch", "historyCount",
     "refreshButton", "historyList", "historyEmpty", "historyDetail",
     "detailPlaceholder", "detailContent", "detailTime", "detailText",
     "deleteButton", "copyButton", "confirmModal", "modalTitle", "modalMessage",
     "modalCancel", "modalConfirm", "toast", "toastMessage", "bootScreen",
     "localModelState", "onlineModelState", "localEngineOptions", "onlineEngineOptions",
-    "recognitionModeOptions", "recognitionModeHint", "sidebarPrivacyText",
+    "realtimeModelOptions", "sidebarPrivacyText",
     "localModelList", "deviceOptions", "fallbackModel",
     "providerList", "modelTestStatus", "localModelSaveButton", "onlineModelSaveButton",
-    "localRecognitionSummary", "onlineRecognitionSummary",
+    "localRecognitionSummary", "onlineRecognitionSummary", "recordingLayeredWave",
   ];
   for (const id of ids) {
     elements[id] = document.getElementById(id);
@@ -143,13 +255,15 @@ function parseHotkey(value) {
 }
 
 async function callApi(method, ...args) {
-  const api = window.pywebview?.api;
+  const api = getLocalApi();
   if (!api || typeof api[method] !== "function") {
     throw new Error("本地功能尚未准备好，请稍后重试。");
   }
   const response = await api[method](...args);
   if (!response || response.ok !== true) {
-    throw new Error(response?.message || "本地操作失败，请稍后重试。");
+    const error = new Error(response?.message || "本地操作失败，请稍后重试。");
+    error.data = response?.data || null;
+    throw error;
   }
   return response;
 }
@@ -178,6 +292,97 @@ function currentView() {
   return "appearance";
 }
 
+function buildRecordingPreviewPoints(width, centerY, amplitude, cycles, phase, count = 36) {
+  const points = [];
+  for (let index = 0; index <= count; index += 1) {
+    const ratio = index / count;
+    const envelope = Math.pow(Math.sin(Math.PI * ratio), 1.65);
+    const harmonic = Math.sin(ratio * Math.PI * 2 * cycles + phase);
+    const detail = Math.sin(ratio * Math.PI * 2 * (cycles * 1.9) - phase * 0.6) * 0.17;
+    points.push({
+      x: ratio * width,
+      y: centerY + (harmonic + detail) * amplitude * envelope,
+    });
+  }
+  return points;
+}
+
+function buildRecordingPreviewPath(points) {
+  let path = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    path += ` Q${current.x.toFixed(1)} ${current.y.toFixed(1)} ${((current.x + next.x) / 2).toFixed(1)} ${((current.y + next.y) / 2).toFixed(1)}`;
+  }
+  const last = points[points.length - 1];
+  return `${path} L${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+}
+
+function renderRecordingPreviewWave() {
+  const container = elements.recordingLayeredWave;
+  if (!container) return;
+  const amplitude = 2 + 0.42 * 18.5;
+  const layers = [
+    [".preview-layered-wave-path-back", amplitude * 0.43, 2.9, -recordingPreviewPhase * 0.82],
+    [".preview-layered-wave-path-middle", amplitude * 0.68, 1.82, recordingPreviewPhase * 0.64 + 0.7],
+    [".preview-layered-wave-path-front", amplitude, 2.25, recordingPreviewPhase],
+  ];
+  for (const [selector, layerAmplitude, cycles, phase] of layers) {
+    const path = container.querySelector(selector);
+    path?.setAttribute("d", buildRecordingPreviewPath(
+      buildRecordingPreviewPoints(120, 36, layerAmplitude, cycles, phase),
+    ));
+  }
+}
+
+function tickRecordingPreview(time) {
+  recordingPreviewFrame = null;
+  const elapsed = recordingPreviewLastTime
+    ? Math.min(40, Math.max(0, time - recordingPreviewLastTime))
+    : 0;
+  recordingPreviewLastTime = time;
+  recordingPreviewPhase += elapsed * (0.0022 + 0.065 * 0.0255);
+  renderRecordingPreviewWave();
+  syncRecordingPreviewMotion();
+}
+
+function syncRecordingPreviewMotion() {
+  if (!elements.recordingLayeredWave) return;
+  const shouldRun = recordingMotionQuery?.matches !== true
+    && !document.hidden
+    && currentView() === "appearance";
+  if (shouldRun && recordingPreviewFrame === null) {
+    recordingPreviewFrame = window.requestAnimationFrame(tickRecordingPreview);
+  } else if (!shouldRun && recordingPreviewFrame !== null) {
+    window.cancelAnimationFrame(recordingPreviewFrame);
+    recordingPreviewFrame = null;
+    recordingPreviewLastTime = 0;
+  }
+  renderRecordingPreviewWave();
+}
+
+function initializeRecordingPreviewMotion() {
+  recordingMotionQuery = typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-reduced-motion: reduce)")
+    : null;
+
+  const handleMotionPreference = () => syncRecordingPreviewMotion();
+  if (typeof recordingMotionQuery?.addEventListener === "function") {
+    recordingMotionQuery.addEventListener("change", handleMotionPreference);
+  } else if (typeof recordingMotionQuery?.addListener === "function") {
+    recordingMotionQuery.addListener(handleMotionPreference);
+  }
+  document.addEventListener("visibilitychange", syncRecordingPreviewMotion);
+  document.addEventListener("visibilitychange", scheduleModelResourcePoll);
+  window.addEventListener("pagehide", () => {
+    window.clearTimeout(state.modelResourceTimer);
+    if (recordingPreviewFrame !== null) window.cancelAnimationFrame(recordingPreviewFrame);
+    recordingPreviewFrame = null;
+    recordingPreviewLastTime = 0;
+  });
+  syncRecordingPreviewMotion();
+}
+
 function switchView(view, focusSearch = false) {
   const next = ["appearance", "localModel", "onlineModel", "history"].includes(view) ? view : "appearance";
   for (const name of ["appearance", "localModel", "onlineModel", "history"]) {
@@ -202,29 +407,58 @@ function switchView(view, focusSearch = false) {
       elements.historySearch.select();
     }, 0);
   }
+  syncRecordingPreviewMotion();
 }
 
 function formatBytes(bytes) {
   const value = Number(bytes || 0);
   if (value <= 0) return "未知";
+  if (value >= 1024 * 1024 * 1024) {
+    return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  }
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function formatDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "正在估算";
+  if (value < 60) return `约 ${Math.max(1, Math.round(value))} 秒`;
+  const minutes = Math.ceil(value / 60);
+  if (minutes < 60) return `约 ${minutes} 分钟`;
+  return `约 ${Math.ceil(minutes / 60)} 小时`;
+}
+
+function formatSpeed(bytesPerSecond) {
+  const value = Number(bytesPerSecond || 0);
+  if (value <= 0) return "正在测速";
+  return `${formatBytes(value)}/秒`;
+}
+
 function syncModelControls(payload = state.model) {
+  const localDraft = state.localEngineId;
+  const onlineDraft = state.onlineEngineId;
   state.model = { ...state.model, ...(payload || {}) };
-  if (state.model.engine_id?.startsWith("local:")) state.localEngineId = state.model.engine_id;
-  if (state.model.engine_id?.startsWith("cloud:")) state.onlineEngineId = state.model.engine_id;
-  const realtimeAvailable = state.model.realtime_model?.available === true;
-  const realtimeInput = elements.recognitionModeOptions.querySelector('input[value="realtime"]');
-  const batchInput = elements.recognitionModeOptions.querySelector('input[value="batch"]');
-  realtimeInput.disabled = !realtimeAvailable;
-  const selectedMode = state.model.recognition_mode === "realtime" && realtimeAvailable
-    ? "realtime"
-    : "batch";
-  (selectedMode === "realtime" ? realtimeInput : batchInput).checked = true;
-  elements.recognitionModeHint.textContent = realtimeAvailable
-    ? "实时文字显示在悬浮按钮上方，录音结束后只向原软件粘贴一次。"
-    : "实时中文模型暂时不可用，目前只能在停止录音后转换文字。";
+  if (localDraft) {
+    state.localEngineId = localDraft;
+  } else if (state.model.engine_id?.startsWith("local:")) {
+    state.localEngineId = state.model.engine_id;
+  }
+  if (onlineDraft) {
+    state.onlineEngineId = onlineDraft;
+  } else if (state.model.engine_id?.startsWith("cloud:")) {
+    state.onlineEngineId = state.model.engine_id;
+  }
+  const realtimeModel = String(state.model.realtime_model || DEFAULT_REALTIME_MODEL);
+  const realtimeStatuses = new Map(
+    (state.model.realtime_models || []).map((item) => [String(item.model_id || ""), item]),
+  );
+  for (const input of elements.realtimeModelOptions.querySelectorAll('input[name="realtimeModel"]')) {
+    const status = realtimeStatuses.get(input.value);
+    input.disabled = status ? status.available !== true : false;
+    input.closest("label")?.classList.toggle("is-unavailable", input.disabled);
+  }
+  const realtimeInput = elements.realtimeModelOptions.querySelector(`input[value="${realtimeModel}"]`);
+  if (realtimeInput && !realtimeInput.disabled) realtimeInput.checked = true;
   renderEngineOptions();
   renderLocalModels();
   renderProviders();
@@ -239,10 +473,11 @@ function syncModelControls(payload = state.model) {
     option.textContent = model.name;
     elements.fallbackModel.append(option);
   }
-  elements.fallbackModel.value = state.model.fallback_model || "sensevoice-small-int8";
+  elements.fallbackModel.value = state.model.fallback_model || "faster-whisper-small";
   updateRecognitionSummary();
   elements.modelTestStatus.textContent = state.model.device_error || "";
   elements.modelTestStatus.classList.toggle("is-error", Boolean(state.model.device_error));
+  scheduleModelResourcePoll();
 }
 
 function createTextElement(tag, className, text) {
@@ -261,9 +496,16 @@ function renderEngineOptions() {
     localEngines.push({
       id: `local:${model.model_id}`,
       name: model.name,
-      description: model.summary || "本地离线识别",
+      description: model.summary || model.language_support || "本地离线识别",
       status: model.status || (model.available ? "已安装" : "不可用"),
-      disabled: !model.available,
+      modelId: model.model_id,
+      available: model.available === true,
+      downloadable: model.downloadable === true,
+      resourceStatus: model.resource_status || null,
+      disabled: !model.available || (
+        state.model.voice_test_active === true
+        && state.model.voice_test_model_id !== model.model_id
+      ),
     });
   }
   for (const provider of state.model.providers || []) {
@@ -288,9 +530,18 @@ function renderEngineOptions() {
 }
 
 function renderEngineGroup(container, engines, inputName, stateKey) {
+  const isLocalGroup = inputName === "localRecognitionEngine";
   for (const engine of engines) {
     const label = document.createElement("label");
     label.className = "engine-option";
+    const resourceState = String(engine.resourceStatus?.state || "");
+    const downloading = ["queued", "downloading", "verifying", "pausing"].includes(resourceState);
+    if (isLocalGroup && engine.downloadable && !engine.available) {
+      const percent = resourceState === "verifying" ? 100 : Number(engine.resourceStatus?.percent || 0);
+      label.classList.add("is-unavailable", "is-downloadable");
+      if (downloading) label.classList.add("is-downloading");
+      label.style.setProperty("--download-progress", `${Math.max(0, Math.min(100, percent))}%`);
+    }
     const input = document.createElement("input");
     input.type = "radio";
     input.name = inputName;
@@ -300,49 +551,165 @@ function renderEngineGroup(container, engines, inputName, stateKey) {
     input.addEventListener("change", () => {
       state[stateKey] = engine.id;
       updateRecognitionSummary();
+      if (isLocalGroup) renderLocalModels();
     });
-    label.append(input, createTextElement("b", "", engine.name),
-      createTextElement("small", "", engine.description),
-      createTextElement("em", "", engine.status));
+    const content = [input, createTextElement("b", "", engine.name),
+      createTextElement("small", "", engine.description)];
+    if (isLocalGroup && engine.downloadable && !engine.available) {
+      const percent = Math.round(Number(engine.resourceStatus?.percent || 0));
+      const labelByState = {
+        queued: "准备中",
+        downloading: `${percent}%`,
+        verifying: "校验中",
+        pausing: "暂停中",
+        paused: "继续下载",
+        failed: "重试下载",
+        deleting: "删除中",
+      };
+      const downloadButton = createTextElement(
+        "button", "model-card-download", labelByState[resourceState] || "下载",
+      );
+      downloadButton.type = "button";
+      downloadButton.disabled = state.modelBusy || ["verifying", "pausing", "deleting"].includes(resourceState);
+      downloadButton.title = ["queued", "downloading"].includes(resourceState) ? "点击暂停下载" : "";
+      downloadButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const action = ["queued", "downloading"].includes(resourceState) ? "pause" : "start";
+        manageLocalModelResource(engine.modelId, action);
+      });
+      content.push(downloadButton);
+    }
+    if (!isLocalGroup) content.push(createTextElement("em", "", engine.status));
+    label.append(...content);
     container.append(label);
   }
 }
 
 function renderLocalModels() {
   elements.localModelList.replaceChildren();
-  for (const model of state.model.local_models || []) {
-    const row = document.createElement("article");
-    row.className = "local-model-row";
-    if (`local:${model.model_id}` === state.model.engine_id) row.classList.add("is-selected");
-    const name = document.createElement("div");
-    name.className = "local-model-name";
-    name.append(createTextElement("b", "", model.name),
-      createTextElement("span", "", `${model.size_label || formatBytes(model.size_bytes)} · ${model.capabilities || "本地离线"}`));
-    const hardware = document.createElement("div");
-    hardware.className = "hardware-copy";
-    const minimum = document.createElement("span");
-    minimum.append(createTextElement("strong", "", "最低："), document.createTextNode(model.minimum || "未提供"));
-    const recommended = document.createElement("span");
-    recommended.append(createTextElement("strong", "", "建议："), document.createTextNode(model.recommended || "未提供"));
-    const gpu = document.createElement("span");
-    gpu.append(createTextElement("strong", "", "显卡："), document.createTextNode(model.gpu || "非必需"));
-    hardware.append(minimum, recommended, gpu);
-    const statusCell = document.createElement("div");
-    statusCell.className = "model-status-cell";
-    const status = createTextElement(
-      "span",
-      `status-pill${model.available ? "" : " is-missing"}`,
-      model.status || (model.available ? "已安装" : "不可用"),
-    );
-    status.title = model.status_message || "";
-    const test = createTextElement("button", "button button-secondary model-test-button", "测试模型");
-    test.type = "button";
-    test.disabled = !model.available;
-    test.addEventListener("click", () => testLocalModel(model.model_id));
-    statusCell.append(status, test);
-    row.append(name, hardware, statusCell);
-    elements.localModelList.append(row);
+  const selectedId = String(state.localEngineId || state.model.engine_id || "").replace(/^local:/, "");
+  const models = state.model.local_models || [];
+  const model = models.find((item) => item.model_id === selectedId)
+    || models.find((item) => item.available)
+    || models[0];
+  if (!model) {
+    elements.localModelList.append(createTextElement("p", "local-model-empty", "没有可用的本地模型。"));
+    return;
   }
+
+  const row = document.createElement("article");
+  row.className = "local-model-row local-model-detail";
+  if (`local:${model.model_id}` === state.model.engine_id) row.classList.add("is-selected");
+
+  const heading = document.createElement("div");
+  heading.className = "local-model-detail-heading";
+  const headingCopy = document.createElement("div");
+  headingCopy.className = "local-model-heading-copy";
+  const name = document.createElement("div");
+  name.className = "local-model-name";
+  name.append(createTextElement("b", "", model.name));
+
+  const statusCell = document.createElement("div");
+  statusCell.className = "model-status-cell";
+  const resourceStatus = model.resource_status || null;
+  const resourceState = String(resourceStatus?.state || "");
+  const resourceStateText = {
+    queued: "准备下载",
+    downloading: `下载 ${Number(resourceStatus?.percent || 0).toFixed(1)}%`,
+    verifying: "正在校验",
+    pausing: "正在暂停",
+    paused: "已暂停",
+    completed: "已安装",
+    failed: "下载失败",
+    deleting: "正在删除",
+  }[resourceState];
+  const status = createTextElement(
+    "span",
+    `status-pill${model.available ? "" : " is-missing"}`,
+    resourceStateText || model.status || (model.available ? "已安装" : "不可用"),
+  );
+  status.title = model.status_message || "";
+  statusCell.append(status);
+  headingCopy.append(statusCell, name);
+  heading.append(headingCopy);
+
+  const details = document.createElement("dl");
+  details.className = "local-model-specs";
+  const specs = [
+    ["模型大小", model.size_label || formatBytes(model.size_bytes)],
+    ["已占空间", formatBytes(resourceStatus?.installed_bytes || model.size_on_disk_bytes)],
+    ["语言支持", model.language_support || "语言支持情况未说明"],
+    ["最低配置", model.minimum || "未提供"],
+    ["建议配置", model.recommended || "未提供"],
+    ["显卡支持", model.gpu || "非必需"],
+  ];
+  for (const [term, value] of specs) {
+    const item = document.createElement("div");
+    item.className = "local-model-spec";
+    item.append(createTextElement("dt", "", term), createTextElement("dd", "", value));
+    details.append(item);
+  }
+  row.append(heading, details);
+  elements.localModelList.append(row);
+}
+
+function scheduleModelResourcePoll() {
+  window.clearTimeout(state.modelResourceTimer);
+  const models = state.model.local_models || [];
+  const active = models.some((model) => {
+    const resourceState = String(model.resource_status?.state || "");
+    return ["queued", "downloading", "verifying", "pausing", "deleting"].includes(resourceState);
+  });
+  if (!active || document.hidden) return;
+  state.modelResourceTimer = window.setTimeout(async () => {
+    const activeModel = models.find((model) => {
+      const resourceState = String(model.resource_status?.state || "");
+      return ["queued", "downloading", "verifying", "pausing", "deleting"].includes(resourceState);
+    });
+    const modelId = activeModel?.model_id;
+    if (!modelId) return;
+    try {
+      const response = await callApi("manage_local_model_resource", modelId, "status");
+      syncModelControls(response.data);
+    } catch (error) {
+      if (error.data) {
+        syncModelControls(error.data);
+      }
+      showToast(error.message, true);
+      elements.modelTestStatus.textContent = error.message;
+      elements.modelTestStatus.classList.add("is-error");
+      if (!error.data) scheduleModelResourcePoll();
+    }
+  }, 500);
+}
+
+async function manageLocalModelResource(modelId, action) {
+  if (state.modelBusy) return;
+  state.modelBusy = true;
+  try {
+    const response = await callApi("manage_local_model_resource", modelId, action);
+    syncModelControls(response.data);
+    if (response.message) showToast(response.message);
+  } catch (error) {
+    if (error.data) syncModelControls(error.data);
+    showToast(error.message, true);
+    elements.modelTestStatus.textContent = error.message;
+    elements.modelTestStatus.classList.add("is-error");
+  } finally {
+    state.modelBusy = false;
+    renderLocalModels();
+    scheduleModelResourcePoll();
+  }
+}
+
+function confirmModelResourceDelete(model) {
+  openConfirm({
+    title: `删除 ${model.name}？`,
+    message: "会删除本机保存的 1.7B 模型和未完成下载。",
+    confirmLabel: "删除模型",
+    action: () => manageLocalModelResource(model.model_id, "delete"),
+  });
 }
 
 function renderProviders() {
@@ -406,19 +773,51 @@ function renderProviders() {
 
 function selectedEngineId(view = currentView()) {
   if (view === "onlineModel") return state.onlineEngineId || state.model.engine_id;
-  if (view === "localModel") return state.localEngineId || state.model.engine_id;
+  if (view === "localModel") {
+    return state.localEngineId || state.model.engine_id;
+  }
   return state.model.engine_id;
 }
 
-function selectedRecognitionMode() {
-  return elements.recognitionModeOptions.querySelector('input[name="recognitionMode"]:checked')?.value || "batch";
+function selectedRealtimeModel() {
+  return elements.realtimeModelOptions.querySelector('input[name="realtimeModel"]:checked')?.value
+    || state.model.realtime_model
+    || DEFAULT_REALTIME_MODEL;
+}
+
+function selectedRealtimeModelName() {
+  const modelId = selectedRealtimeModel();
+  return (state.model.realtime_models || []).find((item) => item.model_id === modelId)?.name
+    || ({
+      "streaming-paraformer-bilingual-zh-en": "Streaming Paraformer",
+      "zipformer-bilingual-zh-en-exp32-int8": "Zipformer",
+    })[modelId]
+    || modelId;
+}
+
+function selectedLocalModelName() {
+  const engineId = selectedEngineId("localModel");
+  const modelId = String(engineId || "").replace(/^local:/, "");
+  return (state.model.local_models || []).find((item) => item.model_id === modelId)?.name
+    || modelId;
+}
+
+function selectedOnlineProviderName() {
+  const engineId = selectedEngineId("onlineModel");
+  const providerId = String(engineId || "").replace(/^cloud:/, "");
+  return (state.model.providers || []).find((item) => item.provider_id === providerId)?.name
+    || "所选在线服务";
 }
 
 function updateRecognitionSummary() {
-  const realtime = selectedRecognitionMode() === "realtime";
-  const modeCopy = realtime ? "边说边显示文字，停止后再校正并粘贴一次。" : "停止录音后转换并粘贴一次。";
-  elements.localRecognitionSummary.textContent = `当前使用本地识别：${modeCopy}录音不会上传。`;
-  elements.onlineRecognitionSummary.textContent = "当前使用在线识别：完整录音会上传给所选厂商，完成后只粘贴一次。";
+  const realtimeName = selectedRealtimeModelName();
+  const deviceName = {
+    auto: "自动选择",
+    cpu: "使用处理器",
+    gpu: "使用显卡",
+  }[selectedModelDevice()] || "自动选择";
+  elements.localRecognitionSummary.textContent = `当前选择：${realtimeName}；${selectedLocalModelName()}；${deviceName}`;
+  elements.onlineRecognitionSummary.textContent = `实时：${realtimeName}；最终：${selectedOnlineProviderName()}；不做文字校正，完整录音会上传。`;
   elements.localModelState.classList.toggle("is-dirty", false);
   elements.onlineModelState.classList.toggle("is-dirty", false);
   elements.localModelState.lastChild.textContent = state.model.engine_id?.startsWith("local:") ? "正在使用" : "可以切换";
@@ -440,7 +839,7 @@ async function saveModelSettings(targetView) {
       selectedEngineId(targetView),
       elements.fallbackModel.value,
       selectedModelDevice(),
-      selectedRecognitionMode(),
+      selectedRealtimeModel(),
     );
     syncModelControls(response.data);
     showToast(response.message || "识别设备已保存并应用。");
@@ -454,19 +853,33 @@ async function saveModelSettings(targetView) {
 }
 
 async function testLocalModel(modelId) {
-  if (state.modelBusy) return;
+  if (state.modelBusy || state.testBusy || state.controlTestActive) return;
   state.modelBusy = true;
-  elements.modelTestStatus.textContent = "正在加载并测试模型…";
+  state.testBusy = true;
+  elements.controlWordTestButton.disabled = true;
+  const stopping = state.model.voice_test_active === true && state.model.voice_test_model_id === modelId;
+  elements.modelTestStatus.textContent = stopping ? "正在停止录音并识别…" : "正在打开麦克风…";
   try {
-    const response = await callApi("test_local_model", modelId, selectedModelDevice());
+    const response = await callApi("test_local_model", modelId, selectedModelDevice(), stopping ? "stop" : "start");
     syncModelControls(response.data);
-    elements.modelTestStatus.textContent = `${response.message} 加载耗时 ${response.data?.elapsed_ms || 0} 毫秒。`;
+    const recognized = String(response.data?.voice_test_text || "");
+    elements.modelTestStatus.textContent = recognized
+      ? `${response.message} 识别结果：${recognized}`
+      : response.message;
     showToast(response.message);
   } catch (error) {
+    if (stopping) {
+      state.model.voice_test_active = false;
+      state.model.voice_test_model_id = "";
+      renderLocalModels();
+    }
     elements.modelTestStatus.textContent = error.message;
     elements.modelTestStatus.classList.add("is-error");
   } finally {
     state.modelBusy = false;
+    state.testBusy = false;
+    elements.controlWordTestButton.disabled = state.model.voice_test_active === true;
+    renderLocalModels();
   }
 }
 
@@ -511,7 +924,10 @@ function isAppearanceDirty() {
   return state.draft.color !== state.saved.color
     || state.draft.opacity !== state.saved.opacity
     || state.draft.hotkey !== state.saved.hotkey
-    || state.draft.standby !== state.saved.standby;
+    || state.draft.standby !== state.saved.standby
+    || state.draft.transcript !== state.saved.transcript
+    || state.draft.autoPaste !== state.saved.autoPaste
+    || state.draft.confidence !== state.saved.confidence;
 }
 
 function updateSaveState() {
@@ -529,6 +945,9 @@ function setAppearanceInputsDisabled(disabled) {
   elements.hotkeyInput.disabled = disabled;
   elements.hotkeyTestButton.disabled = disabled;
   elements.standbyToggle.disabled = disabled;
+  elements.transcriptToggle.disabled = disabled;
+  elements.autoPasteToggle.disabled = disabled;
+  elements.standbyConfidence.disabled = disabled;
   for (const swatch of elements.swatches) {
     swatch.disabled = disabled;
   }
@@ -558,6 +977,12 @@ function syncAppearanceControls() {
   elements.hotkeyInput.value = state.draft.hotkey;
   elements.standbyToggle.checked = state.draft.standby;
   elements.standbyToggle.parentElement.querySelector("b").textContent = state.draft.standby ? "开启" : "关闭";
+  elements.transcriptToggle.checked = state.draft.transcript;
+  elements.transcriptToggle.parentElement.querySelector("b").textContent = state.draft.transcript ? "显示" : "隐藏";
+  elements.autoPasteToggle.checked = state.draft.autoPaste;
+  elements.autoPasteToggle.parentElement.querySelector("b").textContent = state.draft.autoPaste ? "开启" : "关闭";
+  elements.standbyConfidence.value = String(state.draft.confidence);
+  elements.standbyConfidenceValue.textContent = `${state.draft.confidence}%`;
   elements.colorError.textContent = COLOR_PATTERN.test(state.draft.color)
     ? ""
     : "请输入 6 位十六进制颜色，例如 #2563EB。";
@@ -630,7 +1055,7 @@ async function saveAppearance() {
   try {
     const response = await callApi(
       "save_appearance", submitted.color, submitted.opacity, submitted.hotkey,
-      submitted.standby
+      submitted.standby, submitted.transcript, submitted.confidence, submitted.autoPaste
     );
     const data = response.data || {};
     state.saved = {
@@ -638,6 +1063,9 @@ async function saveAppearance() {
       opacity: clampOpacity(data.opacity ?? state.draft.opacity),
       hotkey: parseHotkey(data.hotkey || state.draft.hotkey).label,
       standby: data.standby_enabled === true,
+      transcript: data.live_transcript_visible !== false,
+      autoPaste: data.auto_paste_enabled !== false,
+      confidence: Number(data.standby_confidence || 80),
     };
     state.draft = { ...state.saved };
     syncAppearanceControls();
@@ -739,6 +1167,7 @@ function renderHistory() {
   elements.navHistoryCount.textContent = total > 999 ? "999+" : String(total);
   elements.historyCount.textContent = query ? `${state.entries.length} 条匹配` : `${total} 条记录`;
   elements.clearButton.disabled = !state.historyAvailable || total === 0 || state.historyBusy;
+  elements.copyAllButton.disabled = !state.historyAvailable || total === 0 || state.historyBusy;
 
   const nextId = state.entries.some((entry) => entry.id === previousId)
     ? previousId
@@ -800,6 +1229,24 @@ async function copyEntry(operationId = state.selectedId) {
   } finally {
     state.historyBusy = false;
     elements.copyButton.disabled = false;
+  }
+}
+
+async function copyAllHistory() {
+  if (!state.historyAvailable || Number(state.signature[0] || 0) === 0 || state.historyBusy) {
+    return;
+  }
+  state.historyBusy = true;
+  elements.copyAllButton.disabled = true;
+  elements.clearButton.disabled = true;
+  try {
+    const response = await callApi("copy_all_history");
+    showToast(response.message || "全部历史文字已复制到系统剪贴板。");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    state.historyBusy = false;
+    renderHistory();
   }
 }
 
@@ -942,6 +1389,58 @@ function bindEvents() {
     event.target.parentElement.querySelector("b").textContent = event.target.checked ? "开启" : "关闭";
     updateSaveState();
   });
+  elements.transcriptToggle.addEventListener("change", (event) => {
+    state.draft.transcript = event.target.checked;
+    syncAppearanceControls();
+  });
+  elements.autoPasteToggle.addEventListener("change", (event) => {
+    state.draft.autoPaste = event.target.checked;
+    syncAppearanceControls();
+  });
+  elements.standbyConfidence.addEventListener("input", (event) => {
+    state.draft.confidence = Math.max(70, Math.min(100, Number(event.target.value) || 80));
+    syncAppearanceControls();
+  });
+  elements.controlWordTestButton.addEventListener("click", async () => {
+    if (state.testBusy || state.model.voice_test_active === true) return;
+    const stopping = elements.controlWordTestButton.dataset.active === "true";
+    state.testBusy = true;
+    elements.controlWordTestButton.disabled = true;
+    elements.controlWordTestButton.setAttribute("aria-busy", "true");
+    elements.controlWordTestStatus.classList.remove("is-error");
+    renderLocalModels();
+    try {
+      const response = await callApi("test_standby_control", stopping ? "stop" : "start");
+      state.controlTestActive = !stopping;
+      elements.controlWordTestButton.dataset.active = stopping ? "false" : "true";
+      elements.controlWordTestButton.setAttribute("aria-pressed", stopping ? "false" : "true");
+      elements.controlWordTestButton.textContent = stopping ? "测试控制词" : "停止测试";
+      elements.controlWordTestStatus.textContent = response.message;
+      if (!stopping) {
+        const poll = async () => {
+          if (elements.controlWordTestButton.dataset.active !== "true") return;
+          try {
+            const status = await callApi("test_standby_control", "status");
+            const data = status.data || {};
+            if (data.word) elements.controlWordTestStatus.textContent = `识别为“${data.word}”，匹配置信度 ${data.confidence}%`;
+          } catch (_error) {}
+          window.setTimeout(poll, 400);
+        };
+        window.setTimeout(poll, 400);
+      }
+    } catch (error) {
+      state.controlTestActive = false;
+      elements.controlWordTestButton.dataset.active = "false";
+      elements.controlWordTestButton.setAttribute("aria-pressed", "false");
+      elements.controlWordTestStatus.textContent = error.message;
+      elements.controlWordTestStatus.classList.add("is-error");
+    } finally {
+      state.testBusy = false;
+      elements.controlWordTestButton.removeAttribute("aria-busy");
+      elements.controlWordTestButton.disabled = state.model.voice_test_active === true;
+      renderLocalModels();
+    }
+  });
   elements.resetButton.addEventListener("click", () => {
     state.draft = { ...state.defaults };
     syncAppearanceControls();
@@ -949,7 +1448,8 @@ function bindEvents() {
   elements.saveButton.addEventListener("click", saveAppearance);
   elements.localModelSaveButton.addEventListener("click", () => saveModelSettings("localModel"));
   elements.onlineModelSaveButton.addEventListener("click", () => saveModelSettings("onlineModel"));
-  elements.recognitionModeOptions.addEventListener("change", updateRecognitionSummary);
+  elements.realtimeModelOptions.addEventListener("change", updateRecognitionSummary);
+  elements.deviceOptions.addEventListener("change", updateRecognitionSummary);
 
   elements.historySearch.maxLength = 200;
   elements.historySearch.addEventListener("input", () => {
@@ -958,6 +1458,7 @@ function bindEvents() {
   });
   elements.refreshButton.addEventListener("click", () => loadHistory());
   elements.copyButton.addEventListener("click", () => copyEntry());
+  elements.copyAllButton.addEventListener("click", copyAllHistory);
   elements.deleteButton.addEventListener("click", requestDeleteSelected);
   elements.clearButton.addEventListener("click", requestClearHistory);
 
@@ -988,7 +1489,7 @@ function bindEvents() {
 }
 
 async function initializeBridge() {
-  if (bridgeStarted || typeof window.pywebview?.api?.get_initial_state !== "function") {
+  if (bridgeStarted || typeof getLocalApi()?.get_initial_state !== "function") {
     return;
   }
   bridgeStarted = true;
@@ -1004,6 +1505,9 @@ async function initializeBridge() {
       opacity,
       hotkey: hotkey.valid ? hotkey.label : "Ctrl+Alt+Space",
       standby: appearance.standby_enabled === true,
+      transcript: appearance.live_transcript_visible !== false,
+      autoPaste: appearance.auto_paste_enabled !== false,
+      confidence: Number(appearance.standby_confidence || 80),
     };
     state.draft = { ...state.saved };
     const defaultColor = normalizeColor(appearance.default_color || "#2563EB");
@@ -1012,12 +1516,15 @@ async function initializeBridge() {
       opacity: clampOpacity(appearance.default_opacity ?? 100),
       hotkey: parseHotkey(appearance.default_hotkey || "Ctrl+Alt+Space").label,
       standby: appearance.default_standby_enabled === true,
+      transcript: appearance.default_live_transcript_visible !== false,
+      autoPaste: appearance.default_auto_paste_enabled !== false,
+      confidence: Number(appearance.default_standby_confidence || 80),
     };
     normalizeHistoryPayload(response.data?.history || {});
     syncModelControls(response.data?.model || {});
     syncAppearanceControls();
     renderHistory();
-    state.pollTimer = window.setInterval(pollHistorySignature, 1200);
+    state.pollTimer = window.setInterval(pollHistorySignature, 3000);
   } catch (error) {
     bridgeStarted = false;
     if (state.bridgeAttempts < 2) {
@@ -1037,8 +1544,9 @@ rootRule = findRootRule();
 bindEvents();
 syncAppearanceControls();
 renderHistory();
+initializeRecordingPreviewMotion();
 
 window.addEventListener("pywebviewready", initializeBridge);
-if (typeof window.pywebview?.api?.get_initial_state === "function") {
+if (typeof getLocalApi()?.get_initial_state === "function") {
   initializeBridge();
 }

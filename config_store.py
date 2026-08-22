@@ -14,18 +14,27 @@ from global_hotkey import normalize_hotkey
 
 APP_DATA_DIR = Path(os.getenv("LOCALAPPDATA", Path.home())) / "FloatingVoiceButton"
 CONFIG_PATH = APP_DATA_DIR / "config.json"
-CONFIG_VERSION = 6
-DEFAULT_LOCAL_MODEL = "sensevoice-small-int8"
-REALTIME_MODEL_ID = "zipformer-ctc-zh-small-int8"
+CONFIG_VERSION = 12
+DEFAULT_LOCAL_MODEL = "faster-whisper-small"
+LEGACY_LOCAL_MODELS = {
+    "sensevoice-small-int8": DEFAULT_LOCAL_MODEL,
+    "paraformer-zh-small-int8": DEFAULT_LOCAL_MODEL,
+    "qwen3-asr-1.7b-q5km-hotwords": "qwen3-asr-1.7b-q5km",
+}
+DEFAULT_REALTIME_MODEL = "streaming-paraformer-bilingual-zh-en"
+ZIPFORMER_REALTIME_MODEL = "zipformer-bilingual-zh-en-exp32-int8"
+REALTIME_MODEL_IDS = frozenset({
+    DEFAULT_REALTIME_MODEL,
+    ZIPFORMER_REALTIME_MODEL,
+})
 LOCAL_MODEL_IDS = frozenset({
     DEFAULT_LOCAL_MODEL,
-    "paraformer-zh-small-int8",
     "qwen3-asr-0.6b-int8",
+    "qwen3-asr-1.7b-q5km",
     "faster-whisper-small",
 })
 CLOUD_PROVIDER_IDS = frozenset({"volcengine", "iflytek", "tencent", "aliyun"})
 DEFAULT_RECOGNITION_ENGINE = f"local:{DEFAULT_LOCAL_MODEL}"
-DEFAULT_RECOGNITION_MODE = "realtime"
 
 # 在线服务密钥只能存入 Windows 凭据管理器。这里同时清理早期版本或
 # 手工编辑配置时可能写入的常见密钥字段，防止它们被再次保存到 config.json。
@@ -48,12 +57,15 @@ _SECRET_CONFIG_KEYS = frozenset({
 DEFAULT_CONFIG = {
     "config_version": CONFIG_VERSION,
     "paste_wait_ms": 150,
+    "auto_paste_enabled": True,
     "button_size": 72,
     "button_color": "#2563EB",
     "button_opacity": 100,
     "global_hotkey": "Ctrl+Alt+Space",
     "standby_enabled": False,
-    "recognition_mode": DEFAULT_RECOGNITION_MODE,
+    "standby_confidence": 80,
+    "live_transcript_visible": True,
+    "realtime_model": DEFAULT_REALTIME_MODEL,
     "recognition_engine": DEFAULT_RECOGNITION_ENGINE,
     "fallback_model": DEFAULT_LOCAL_MODEL,
     "local_asr_device": "auto",
@@ -111,6 +123,9 @@ def normalize_recognition_engine(value: object) -> str:
     text = str(value or "").strip().lower()
     if text.startswith("online:"):
         text = f"cloud:{text.removeprefix('online:')}"
+    local_candidate = text.removeprefix("local:")
+    if local_candidate in LEGACY_LOCAL_MODELS:
+        text = f"local:{LEGACY_LOCAL_MODELS[local_candidate]}"
     if text == "cloud:xfyun":
         text = "cloud:iflytek"
     elif text == "xfyun":
@@ -134,13 +149,14 @@ def normalize_fallback_model(value: object) -> str:
     text = str(value or "").strip().lower()
     if text.startswith("local:"):
         text = text.removeprefix("local:")
+    text = LEGACY_LOCAL_MODELS.get(text, text)
     return text if text in LOCAL_MODEL_IDS else DEFAULT_LOCAL_MODEL
 
 
-def normalize_recognition_mode(value: object) -> str:
-    """实时识别边说边预览；整段识别保持原有停止后转换方式。"""
+def normalize_realtime_model(value: object) -> str:
+    """实时文字只允许使用已经接入并登记的两套流式模型。"""
     text = str(value or "").strip().lower()
-    return text if text in ("realtime", "batch") else DEFAULT_RECOGNITION_MODE
+    return text if text in REALTIME_MODEL_IDS else DEFAULT_REALTIME_MODEL
 
 
 def _normalize(raw: dict) -> dict:
@@ -158,8 +174,18 @@ def _normalize(raw: dict) -> dict:
     config["button_color"] = normalize_hex_color(config.get("button_color"))
     config["global_hotkey"] = normalize_hotkey(config.get("global_hotkey"))
     config["standby_enabled"] = bool(config.get("standby_enabled", False))
-    config["recognition_mode"] = normalize_recognition_mode(
-        config.get("recognition_mode")
+    config["auto_paste_enabled"] = bool(config.get("auto_paste_enabled", True))
+    try:
+        config["standby_confidence"] = max(
+            70, min(100, int(config.get("standby_confidence", 80)))
+        )
+    except (TypeError, ValueError):
+        config["standby_confidence"] = 80
+    config["live_transcript_visible"] = bool(
+        config.get("live_transcript_visible", True)
+    )
+    config["realtime_model"] = normalize_realtime_model(
+        config.get("realtime_model")
     )
     config["recognition_engine"] = normalize_recognition_engine(
         config.get("recognition_engine")

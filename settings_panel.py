@@ -3,6 +3,8 @@ from __future__ import annotations
 import ctypes
 import os
 import re
+import threading
+import time
 import traceback
 import uuid
 from ctypes import wintypes
@@ -14,23 +16,39 @@ except ImportError:
     webview = None
 
 from automation import write_clipboard_text
+from audio_level import AudioLevelMonitor
 from cloud_asr import get_provider_catalog, validate_credentials
 from config_store import (
     APP_DATA_DIR,
+    DEFAULT_REALTIME_MODEL,
     DEFAULT_CONFIG,
+    REALTIME_MODEL_IDS,
     load_config,
-    normalize_recognition_mode,
+    normalize_realtime_model,
     update_config,
 )
 from credential_store import CredentialStore
 from history_store import HistoryEntry, HistoryRevisionMismatch, HistoryStore
 from global_hotkey import parse_hotkey
 from logger import build_loggers
-from local_asr import LocalModelRecognizer, choose_provider, get_local_model_catalog
-from realtime_asr import get_realtime_model_status
+from local_asr import (
+    LocalModelRecognizer,
+    choose_model_device,
+    get_downloadable_model_resources,
+    get_local_model_catalog,
+    get_model_download_resource,
+)
+from model_download import DownloadSpec, ModelDownloadManager
+from realtime_asr import (
+    RealtimeRecognizer,
+    get_realtime_model_catalog,
+    get_realtime_model_status,
+)
+from standby_listener import standby_control_match
+from test_mode_signal import TestModeLease
 
 
-PANEL_TITLE = "悬浮语音按钮 · 设置与历史记录"
+PANEL_TITLE = "语点 · 设置与历史记录"
 APP_NAME = "悬浮语音按钮"
 PROJECT_DIR = Path(__file__).resolve().parent
 WEB_ENTRY = Path("web") / "index.html"
@@ -59,8 +77,8 @@ def _success(data: dict | list | None = None, message: str = "") -> dict:
     return {"ok": True, "data": data if data is not None else {}, "message": message}
 
 
-def _failure(message: str) -> dict:
-    return {"ok": False, "data": {}, "message": message}
+def _failure(message: str, data: dict | list | None = None) -> dict:
+    return {"ok": False, "data": data if data is not None else {}, "message": message}
 
 
 def _serialize_entry(entry: HistoryEntry) -> dict:
@@ -79,6 +97,31 @@ class WebSettingsApi:
         self._run_log = run_log
         self._error_log = error_log
         self._credential_store = CredentialStore()
+        self._voice_test_lock = threading.RLock()
+        self._model_resource_lock = threading.RLock()
+        self._voice_test_monitor: AudioLevelMonitor | None = None
+        self._voice_test_model_id = ""
+        self._control_test_monitor: AudioLevelMonitor | None = None
+        self._control_test_session = None
+        self._control_test_result = {"active": False, "word": "", "confidence": 0}
+        self._test_mode_lease = TestModeLease()
+        self._active_test_kind = ""
+        download_specs = {}
+        for resource in get_downloadable_model_resources():
+            spec = DownloadSpec(
+                resource_id=str(resource["resource_id"]),
+                url=str(resource["url"]),
+                target_path=Path(str(resource["target_path"])),
+                version=str(resource["version"]),
+                total_size=int(resource["size_bytes"]),
+                sha256=str(resource["sha256"]),
+            )
+            download_specs[spec.resource_id] = spec
+        self._model_downloads = ModelDownloadManager(
+            download_specs,
+            run_log=self._run_log,
+            error_log=self._error_log,
+        )
         if store is not None:
             self._store: HistoryStore | None = store
             self._history_error = False
@@ -169,6 +212,16 @@ class WebSettingsApi:
                     "default_hotkey": str(DEFAULT_CONFIG["global_hotkey"]),
                     "standby_enabled": bool(config["standby_enabled"]),
                     "default_standby_enabled": bool(DEFAULT_CONFIG["standby_enabled"]),
+                    "standby_confidence": int(config["standby_confidence"]),
+                    "default_standby_confidence": int(DEFAULT_CONFIG["standby_confidence"]),
+                    "live_transcript_visible": bool(config["live_transcript_visible"]),
+                    "default_live_transcript_visible": bool(
+                        DEFAULT_CONFIG["live_transcript_visible"]
+                    ),
+                    "auto_paste_enabled": bool(config["auto_paste_enabled"]),
+                    "default_auto_paste_enabled": bool(
+                        DEFAULT_CONFIG["auto_paste_enabled"]
+                    ),
                 },
                 "history": self._history_payload(),
                 "model": self._recognition_payload(config),
@@ -182,13 +235,25 @@ class WebSettingsApi:
     def _recognition_payload(self, config: dict | None = None) -> dict:
         current = config or load_config()
         preference = str(current.get("local_asr_device", "auto"))
+        engine_id = str(
+            current.get("recognition_engine", "local:faster-whisper-small")
+        )
+        device_model_id = (
+            engine_id.partition(":")[2]
+            if engine_id.startswith("local:")
+            else str(current.get("fallback_model", "faster-whisper-small"))
+        )
         try:
-            _provider, device_label = choose_provider(preference)
+            _provider, device_label = choose_model_device(
+                device_model_id, preference
+            )
             device_error = ""
         except Exception as exc:
             device_label = "不可用"
             device_error = str(exc)
         local_models = []
+        registered_resource_ids = set(self._model_downloads.resource_ids)
+        resource_statuses: dict[str, dict] = {}
         for incoming in get_local_model_catalog():
             model = dict(incoming)
             hardware = model.get("hardware") or {}
@@ -201,6 +266,15 @@ class WebSettingsApi:
                 if isinstance(capabilities, (list, tuple))
                 else str(capabilities or "本地离线识别")
             )
+            model["language_support"] = str(
+                model.get("language_support") or "语言支持情况未说明"
+            )
+            resource_id = str(model.get("resource_id") or "")
+            if resource_id in registered_resource_ids:
+                if resource_id not in resource_statuses:
+                    resource_statuses[resource_id] = self._model_downloads.status(resource_id)
+                # 同一资源可对应多个识别 profile；一次 payload 内必须使用同一快照。
+                model["resource_status"] = dict(resource_statuses[resource_id])
             local_models.append(model)
         providers = []
         provider_descriptions = {
@@ -227,18 +301,23 @@ class WebSettingsApi:
                     for field in incoming["credential_fields"]
                 ],
             })
+        with self._voice_test_lock:
+            voice_test_active = self._voice_test_monitor is not None
+            voice_test_model_id = self._voice_test_model_id
         return {
-            "engine_id": str(current.get("recognition_engine", "local:sensevoice-small-int8")),
-            "recognition_mode": normalize_recognition_mode(
-                current.get("recognition_mode")
+            "engine_id": engine_id,
+            "realtime_model": normalize_realtime_model(
+                current.get("realtime_model")
             ),
-            "realtime_model": get_realtime_model_status(),
-            "fallback_model": str(current.get("fallback_model", "sensevoice-small-int8")),
+            "realtime_models": get_realtime_model_catalog(),
+            "fallback_model": str(current.get("fallback_model", "faster-whisper-small")),
             "preference": preference,
             "device": device_label,
             "device_error": device_error,
             "local_models": local_models,
             "providers": providers,
+            "voice_test_active": voice_test_active,
+            "voice_test_model_id": voice_test_model_id,
         }
 
     def save_recognition_settings(
@@ -246,34 +325,38 @@ class WebSettingsApi:
         engine_id: str,
         fallback_model: str,
         device: str,
-        recognition_mode: str = "batch",
+        realtime_model: str | None = None,
     ) -> dict:
         operation_id = self._operation_id()
         normalized = str(device or "").strip().lower()
         if normalized not in ("auto", "cpu", "gpu"):
             return _failure("识别设备选项无效。")
-        normalized_mode = str(recognition_mode or "").strip().lower()
-        if normalized_mode not in ("realtime", "batch"):
-            return _failure("文字出现方式无效。")
-        if normalized_mode == "realtime" and not bool(
-            get_realtime_model_status().get("available")
+        selected_realtime_model = str(
+            realtime_model or load_config().get("realtime_model", DEFAULT_REALTIME_MODEL)
+        ).strip().lower()
+        if selected_realtime_model not in REALTIME_MODEL_IDS:
+            return _failure("实时显示模型无效。")
+        if not bool(
+            get_realtime_model_status(selected_realtime_model).get("available")
         ):
-            return _failure("实时中文模型尚未安装完整或缺少运行组件。")
+            return _failure("所选实时显示模型尚未安装完整或缺少运行组件。")
         try:
-            choose_provider(normalized)
-            local_ids = {str(item["model_id"]) for item in get_local_model_catalog()}
+            local_catalog = {
+                str(item["model_id"]): item for item in get_local_model_catalog()
+            }
+            local_ids = set(local_catalog)
             provider_ids = {str(item["id"]) for item in get_provider_catalog()}
             selected_engine = str(engine_id or "").strip().lower()
+            downloadable_roles: list[tuple[str, str]] = []
             if selected_engine.startswith("local:"):
                 selected_local_id = selected_engine.split(":", 1)[1]
                 if selected_local_id not in local_ids:
                     return _failure("所选本地模型无效。")
-                selected_status = next(
-                    item for item in get_local_model_catalog()
-                    if str(item["model_id"]) == selected_local_id
-                )
+                selected_status = local_catalog[selected_local_id]
                 if not bool(selected_status.get("available")):
                     return _failure("所选本地模型尚未安装完整或缺少运行组件。")
+                choose_model_device(selected_local_id, normalized)
+                downloadable_roles.append(("所选本地模型", selected_local_id))
             elif selected_engine.startswith("cloud:"):
                 provider_id = selected_engine.split(":", 1)[1]
                 if provider_id not in provider_ids:
@@ -285,23 +368,30 @@ class WebSettingsApi:
             normalized_fallback = str(fallback_model or "").strip().lower()
             if normalized_fallback not in local_ids:
                 return _failure("本地备用模型无效。")
-            fallback_status = next(
-                item for item in get_local_model_catalog()
-                if str(item["model_id"]) == normalized_fallback
-            )
+            fallback_status = local_catalog[normalized_fallback]
             if not bool(fallback_status.get("available")):
                 return _failure("本地备用模型尚未安装完整或缺少运行组件。")
-            update_config({
+            downloadable_roles.append(("本地备用模型", normalized_fallback))
+            if selected_engine.startswith("cloud:"):
+                choose_model_device(normalized_fallback, normalized)
+            changes = {
                 "recognition_engine": selected_engine,
                 "fallback_model": normalized_fallback,
                 "local_asr_device": normalized,
-                "recognition_mode": normalized_mode,
-            })
-            payload = self._recognition_payload()
+                "realtime_model": selected_realtime_model,
+            }
+            # 与异步 delete 共用同一把锁：要么先保存成功，使 delete 看到“正在使用”；
+            # 要么 delete 先进入 deleting，保存会被可信状态门禁拒绝。
+            with self._model_resource_lock:
+                resource_error = self._downloadable_models_ready(downloadable_roles)
+                if resource_error:
+                    return _failure(resource_error)
+                updated = update_config(changes)
+            payload = self._recognition_payload(updated)
             self._run_log.info(
-                "面板操作完成 | 编号=%s | 阶段=保存识别设置 | 引擎=%s | 设备=%s | 文字模式=%s",
+                "面板操作完成 | 编号=%s | 阶段=保存识别设置 | 引擎=%s | 设备=%s | 实时模型=%s",
                 operation_id, selected_engine, payload["device"],
-                "实时识别" if normalized_mode == "realtime" else "整段识别",
+                payload["realtime_model"],
             )
             return _success(payload, "识别设置已保存并应用。")
         except Exception as exc:
@@ -311,29 +401,334 @@ class WebSettingsApi:
             )
             return _failure("识别设置保存失败，请查看错误日志。")
 
-    def test_local_model(self, model_id: str, device: str = "auto") -> dict:
+    def _downloadable_models_ready(
+        self,
+        model_roles: list[tuple[str, str]],
+    ) -> str | None:
+        """确认准备保存的按需模型都已完成下载并持有可信校验凭据。"""
+        registered_resource_ids = set(self._model_downloads.resource_ids)
+        snapshots: dict[str, dict] = {}
+        for label, model_id in model_roles:
+            resource = get_model_download_resource(model_id)
+            if resource is None:
+                # 随安装包提供的非下载模型保持原有可用性判断。
+                continue
+            resource_id = str(resource["resource_id"])
+            if resource_id not in registered_resource_ids:
+                return f"{label}的下载资源尚未注册，请重新启动程序后重试。"
+            if resource_id not in snapshots:
+                snapshots[resource_id] = self._model_downloads.status(resource_id)
+            snapshot = snapshots[resource_id]
+            state = str(snapshot.get("state") or "")
+            if state == "completed" and snapshot.get("verified") is True:
+                continue
+            if state == "deleting":
+                return f"{label}正在删除，请等待完成后重新下载并校验。"
+            if state in {"queued", "downloading", "verifying", "pausing"}:
+                return f"{label}仍在下载、校验或暂停处理中，请等待完整性校验完成。"
+            if state == "failed":
+                return f"{label}资源当前失败，请先重试下载或校验。"
+            return f"{label}尚未下载完成并通过 SHA-256 完整性校验。"
+        return None
+
+    def _resource_is_in_use(self, resource_id: str) -> bool:
+        config = load_config()
+        referenced_model_ids = [str(config.get("fallback_model") or "")]
+        engine_id = str(config.get("recognition_engine") or "")
+        if engine_id.startswith("local:"):
+            referenced_model_ids.append(engine_id.partition(":")[2])
+        for model_id in referenced_model_ids:
+            resource = get_model_download_resource(model_id)
+            if resource is not None and str(resource["resource_id"]) == resource_id:
+                return True
+        return False
+
+    @staticmethod
+    def _resource_status_from_payload(payload: dict, resource_id: str) -> dict | None:
+        for model in payload.get("local_models") or []:
+            if str(model.get("resource_id") or "") != resource_id:
+                continue
+            snapshot = model.get("resource_status")
+            if isinstance(snapshot, dict):
+                return snapshot
+        return None
+
+    def manage_local_model_resource(
+        self, model_id: str, action: str = "status"
+    ) -> dict:
+        operation_id = self._operation_id()
+        normalized_model = str(model_id or "").strip().lower()
+        normalized_action = str(action or "status").strip().lower()
+        resource = get_model_download_resource(normalized_model)
+        if resource is None:
+            return _failure("这个模型没有可管理的按需下载资源。")
+        resource_id = str(resource["resource_id"])
+        if resource_id not in self._model_downloads.resource_ids:
+            return _failure("模型下载资源尚未注册。")
+        if normalized_action not in {"status", "start", "pause", "delete"}:
+            return _failure("模型资源操作无效。")
+        try:
+            snapshot = None
+            if normalized_action == "start":
+                snapshot = self._model_downloads.start(resource_id)
+            elif normalized_action == "pause":
+                snapshot = self._model_downloads.pause(resource_id)
+            elif normalized_action == "delete":
+                with self._model_resource_lock:
+                    if self._resource_is_in_use(resource_id):
+                        return _failure("该模型正在作为当前模型或在线备用模型，请先切换并保存。")
+                    with self._voice_test_lock:
+                        if self._active_test_kind == "model":
+                            return _failure("语音测试正在进行，请先停止后再删除模型。")
+                    snapshot = self._model_downloads.delete(resource_id)
+            else:
+                snapshot = self._model_downloads.status(resource_id)
+            payload = self._recognition_payload()
+            current_snapshot = (
+                self._resource_status_from_payload(payload, resource_id) or snapshot or {}
+            )
+            state = str(current_snapshot.get("state") or "")
+            if state == "failed":
+                reason = str(current_snapshot.get("error") or "模型资源操作失败。")
+                self._error_log.error(
+                    "面板操作失败 | 编号=%s | 阶段=模型资源管理 | 资源=%s | 动作=%s | 原因=%s",
+                    operation_id, resource_id, normalized_action, reason,
+                )
+                return _failure(f"模型资源操作失败：{reason}", payload)
+            if normalized_action == "start":
+                message = {
+                    "completed": "模型已安装并通过完整性校验。",
+                    "verifying": "正在校验模型完整性。",
+                    "paused": "模型下载仍处于暂停状态，可再次继续。",
+                }.get(state, "模型下载已开始；关闭设置窗口后可在下次继续。")
+            elif normalized_action == "pause":
+                message = (
+                    "模型下载已暂停，已下载内容会保留。"
+                    if state == "paused"
+                    else "正在暂停模型下载，已下载内容会保留。"
+                )
+            elif normalized_action == "delete":
+                message = (
+                    "模型文件和未完成下载已删除。"
+                    if state == "not_started"
+                    else "正在删除模型文件和未完成下载。"
+                )
+            else:
+                message = ""
+            if normalized_action != "status":
+                self._run_log.info(
+                    "面板操作完成 | 编号=%s | 阶段=模型资源管理 | 资源=%s | 动作=%s",
+                    operation_id, resource_id, normalized_action,
+                )
+            return _success(payload, message)
+        except Exception as exc:
+            self._error_log.exception(
+                "面板操作失败 | 编号=%s | 阶段=模型资源管理 | 资源=%s | 动作=%s | 异常类型=%s",
+                operation_id, resource_id, normalized_action, type(exc).__name__,
+            )
+            return _failure(f"模型资源操作失败：{exc}")
+
+    def test_local_model(
+        self, model_id: str, device: str = "auto", action: str = "start"
+    ) -> dict:
         operation_id = self._operation_id()
         normalized = str(device or "auto").strip().lower()
+        normalized_model = str(model_id or "").strip().lower()
+        normalized_action = str(action or "start").strip().lower()
+        if normalized_action not in ("start", "stop"):
+            return _failure("语音测试操作无效。")
         try:
-            recognizer = LocalModelRecognizer(str(model_id), normalized)
-            started = __import__("time").monotonic()
-            recognizer.load()
-            elapsed = int((__import__("time").monotonic() - started) * 1000)
+            catalog = {str(item["model_id"]): item for item in get_local_model_catalog()}
+            selected = catalog.get(normalized_model)
+            if selected is None:
+                return _failure("所选本地模型无效。")
+            if not bool(selected.get("available")):
+                return _failure("所选本地模型尚未安装完整或缺少运行组件。")
+            if normalized_action == "start":
+                with self._voice_test_lock:
+                    if self._active_test_kind:
+                        return _failure("已有语音测试正在进行，请先停止。")
+                    self._active_test_kind = "model"
+                    self._test_mode_lease.acquire()
+                    if self._main_window_exists():
+                        test_state = self._test_mode_lease.wait_for_host()
+                        if test_state != "ready":
+                            self._active_test_kind = ""
+                            self._test_mode_lease.release()
+                            return _failure(
+                                "悬浮球正在录音或处理，请结束后再测试。"
+                                if test_state == "blocked"
+                                else "等待悬浮球暂停超时，请稍后重试。"
+                            )
+                    monitor = AudioLevelMonitor()
+                    monitor.start(lambda _levels: None)
+                    self._voice_test_monitor = monitor
+                    self._voice_test_model_id = normalized_model
+                payload = self._recognition_payload({
+                    **load_config(), "local_asr_device": normalized,
+                })
+                payload.update({
+                    "voice_test_active": True,
+                    "voice_test_model_id": normalized_model,
+                })
+                self._run_log.info(
+                    "面板操作开始 | 编号=%s | 阶段=本地模型语音测试录音 | 模型=%s",
+                    operation_id, normalized_model,
+                )
+                return _success(payload, "语音测试正在录音，再次点击可停止并识别。")
+
+            with self._voice_test_lock:
+                monitor = self._voice_test_monitor
+                active_model = self._voice_test_model_id
+                if monitor is None or active_model != normalized_model:
+                    return _failure("这个模型当前没有正在进行的语音测试。")
+                self._voice_test_monitor = None
+                self._voice_test_model_id = ""
+            pcm, sample_rate = monitor.stop()
+            if len(pcm) < sample_rate // 2:
+                self._finish_test_kind("model")
+                return _failure("录音时间太短，请重新测试。")
+            recognizer = LocalModelRecognizer(normalized_model, normalized)
+            started = time.monotonic()
+            try:
+                text = recognizer.transcribe_pcm16(pcm, sample_rate).strip()
+                device_label = recognizer.device_label
+            finally:
+                recognizer.close()
+            elapsed = int((time.monotonic() - started) * 1000)
+            if not text:
+                self._finish_test_kind("model")
+                return _failure("没有识别到文字，请靠近麦克风后重试。")
             payload = self._recognition_payload({
                 **load_config(), "local_asr_device": normalized,
             })
-            payload["elapsed_ms"] = elapsed
+            payload.update({
+                "elapsed_ms": elapsed,
+                "voice_test_active": False,
+                "voice_test_model_id": "",
+                "voice_test_text": text,
+            })
             self._run_log.info(
-                "面板操作完成 | 编号=%s | 阶段=测试本地模型 | 模型=%s | 设备=%s | 耗时毫秒=%d",
-                operation_id, str(model_id), recognizer.device_label, elapsed,
+                "面板操作完成 | 编号=%s | 阶段=本地模型语音测试 | 模型=%s | 设备=%s | 耗时毫秒=%d | 字符数=%d",
+                operation_id, normalized_model, device_label, elapsed, len(text),
             )
-            return _success(payload, f"模型测试成功，当前使用 {recognizer.device_label}。")
+            self._finish_test_kind("model")
+            return _success(payload, f"语音测试完成，当前使用 {device_label}。")
         except Exception as exc:
+            self._close_voice_test()
             self._error_log.exception(
-                "面板操作失败 | 编号=%s | 阶段=测试本地模型 | 异常类型=%s",
+                "面板操作失败 | 编号=%s | 阶段=本地模型语音测试 | 异常类型=%s",
                 operation_id, type(exc).__name__,
             )
-            return _failure(f"模型测试失败：{exc}")
+            return _failure(f"语音测试失败：{exc}")
+
+    def _close_voice_test(self) -> None:
+        with self._voice_test_lock:
+            monitor, self._voice_test_monitor = self._voice_test_monitor, None
+            self._voice_test_model_id = ""
+        if monitor is not None:
+            monitor.close()
+        self._finish_test_kind("model")
+
+    def test_standby_control(self, action: str = "status") -> dict:
+        """录一段控制词并返回文字匹配置信度；不保存音频或正文。"""
+        normalized = str(action or "status").strip().lower()
+        if normalized not in {"start", "stop", "status"}:
+            return _failure("控制词测试操作无效。")
+        if normalized == "stop":
+            self._close_control_test()
+            return _success(dict(self._control_test_result), "控制词测试已停止。")
+        with self._voice_test_lock:
+            if normalized == "status":
+                return _success(dict(self._control_test_result))
+            if self._active_test_kind:
+                return _failure("已有语音测试正在进行，请先停止。")
+            self._active_test_kind = "control"
+        try:
+            self._test_mode_lease.acquire()
+            if self._main_window_exists():
+                test_state = self._test_mode_lease.wait_for_host()
+                if test_state != "ready":
+                    with self._voice_test_lock:
+                        self._active_test_kind = ""
+                    self._test_mode_lease.release()
+                    return _failure(
+                        "悬浮球正在录音或处理，请结束后再测试。"
+                        if test_state == "blocked"
+                        else "等待悬浮球暂停超时，请稍后重试。"
+                    )
+            recognizer = RealtimeRecognizer(
+                model_id=str(load_config().get("realtime_model", DEFAULT_REALTIME_MODEL))
+            )
+            recognizer.load()
+
+            def on_update(update) -> None:
+                if not bool(getattr(update, "endpoint_reached", False)):
+                    return
+                text = str(getattr(update, "endpoint_text", "") or "")
+                word, confidence = standby_control_match(text)
+                with self._voice_test_lock:
+                    if self._control_test_monitor is None:
+                        return
+                    self._control_test_result = {
+                        "active": True,
+                        "word": word or "未命中",
+                        "confidence": confidence,
+                    }
+
+            session = recognizer.create_session(
+                f"control-test-{self._operation_id()}", on_update,
+                max_stable_segments=0,
+            )
+            with self._voice_test_lock:
+                still_active = self._active_test_kind == "control"
+                if still_active:
+                    self._control_test_session = session
+            if not still_active:
+                session.cancel()
+                return _failure("控制词测试已取消。")
+            monitor = AudioLevelMonitor()
+            monitor.open_continuous(lambda _levels: None, session.feed_pcm16)
+            with self._voice_test_lock:
+                still_active = (
+                    self._active_test_kind == "control"
+                    and self._control_test_session is session
+                )
+                if still_active:
+                    self._control_test_monitor = monitor
+                    self._control_test_result = {"active": True, "word": "", "confidence": 0}
+            if not still_active:
+                monitor.close()
+                return _failure("控制词测试已取消。")
+            return _success(dict(self._control_test_result), "请单独说“开始”或“结束”。")
+        except Exception as exc:
+            self._close_control_test()
+            self._error_log.error(
+                "控制词测试失败 | 异常类型=%s", type(exc).__name__
+            )
+            return _failure("控制词测试启动失败，请检查麦克风和实时模型。")
+
+    def _close_control_test(self) -> None:
+        with self._voice_test_lock:
+            monitor, self._control_test_monitor = self._control_test_monitor, None
+            session, self._control_test_session = self._control_test_session, None
+            self._control_test_result = {"active": False, "word": "", "confidence": 0}
+        if monitor is not None:
+            monitor.close()
+        if session is not None:
+            try:
+                session.cancel()
+            except Exception:
+                pass
+        self._finish_test_kind("control")
+
+    def _finish_test_kind(self, kind: str) -> None:
+        with self._voice_test_lock:
+            if self._active_test_kind == kind:
+                self._active_test_kind = ""
+            idle = not self._active_test_kind
+        if idle:
+            self._test_mode_lease.release()
 
     def save_provider_credentials(self, provider_id: str, fields: dict) -> dict:
         operation_id = self._operation_id()
@@ -371,7 +766,7 @@ class WebSettingsApi:
             self._credential_store.delete(provider)
             current = load_config()
             if str(current.get("recognition_engine", "")).endswith(f":{provider}"):
-                update_config({"recognition_engine": "local:sensevoice-small-int8"})
+                update_config({"recognition_engine": "local:faster-whisper-small"})
             self._run_log.info(
                 "面板操作完成 | 编号=%s | 阶段=删除在线识别凭据 | 服务=%s",
                 operation_id, provider,
@@ -390,6 +785,9 @@ class WebSettingsApi:
         opacity: int,
         hotkey: str | None = None,
         standby_enabled: bool | None = None,
+        live_transcript_visible: bool | None = None,
+        standby_confidence: int | None = None,
+        auto_paste_enabled: bool | None = None,
     ) -> dict:
         operation_id = self._operation_id()
         try:
@@ -411,6 +809,20 @@ class WebSettingsApi:
                 if standby_enabled is None
                 else bool(standby_enabled)
             )
+            normalized_transcript = (
+                bool(load_config()["live_transcript_visible"])
+                if live_transcript_visible is None
+                else bool(live_transcript_visible)
+            )
+            normalized_confidence = max(70, min(100, int(
+                load_config()["standby_confidence"]
+                if standby_confidence is None else standby_confidence
+            )))
+            normalized_auto_paste = (
+                bool(load_config()["auto_paste_enabled"])
+                if auto_paste_enabled is None
+                else bool(auto_paste_enabled)
+            )
             self._run_log.info(
                 "面板操作开始 | 编号=%s | 阶段=保存按钮设置", operation_id
             )
@@ -419,16 +831,23 @@ class WebSettingsApi:
                 "button_opacity": normalized_opacity,
                 "global_hotkey": normalized_hotkey,
                 "standby_enabled": normalized_standby,
+                "live_transcript_visible": normalized_transcript,
+                "standby_confidence": normalized_confidence,
+                "auto_paste_enabled": normalized_auto_paste,
             })
             self._run_log.info(
-                "面板操作完成 | 编号=%s | 阶段=保存按钮设置 | 颜色=%s | 透明度=%d%% | 快捷键=%s",
+                "面板操作完成 | 编号=%s | 阶段=保存按钮设置 | 颜色=%s | 透明度=%d%% | 快捷键=%s | 自动输入=%s",
                 operation_id, normalized_color, normalized_opacity, normalized_hotkey,
+                "开启" if normalized_auto_paste else "关闭",
             )
             return _success({
                 "color": normalized_color,
                 "opacity": normalized_opacity,
                 "hotkey": normalized_hotkey,
                 "standby_enabled": normalized_standby,
+                "live_transcript_visible": normalized_transcript,
+                "standby_confidence": normalized_confidence,
+                "auto_paste_enabled": normalized_auto_paste,
             }, "设置已保存并应用。")
         except Exception as exc:
             self._error_log.exception(
@@ -526,6 +945,32 @@ class WebSettingsApi:
             )
             return _failure("复制失败，请稍后重试。")
 
+    def copy_all_history(self) -> dict:
+        action_id = self._operation_id()
+        try:
+            if self._store is None:
+                return _failure("历史数据库暂时不可用。")
+            entries, _signature = self._store.snapshot("")
+            if not entries:
+                return _failure("还没有可复制的历史文字。")
+            text = "\r\n\r\n".join(entry.text for entry in entries)
+            hwnd = self._panel_hwnd()
+            if not hwnd or not write_clipboard_text(text, hwnd):
+                raise RuntimeError("系统剪贴板暂时不可用。")
+            self._run_log.info(
+                "面板操作完成 | 编号=%s | 阶段=复制全部历史文字 | 记录数=%d | 字符数=%d",
+                action_id, len(entries), len(text),
+            )
+            return _success(
+                message=f"已复制全部 {len(entries)} 条历史文字，关闭窗口后仍可粘贴。"
+            )
+        except Exception as exc:
+            self._error_log.exception(
+                "面板操作失败 | 编号=%s | 阶段=复制全部历史文字 | 异常类型=%s",
+                action_id, type(exc).__name__,
+            )
+            return _failure("复制全部失败，请稍后重试。")
+
     def delete_history(self, operation_id: str) -> dict:
         action_id = self._operation_id()
         try:
@@ -571,6 +1016,26 @@ class WebSettingsApi:
             )
             return _failure("清空失败，请查看错误日志。")
 
+    def _shutdown(self) -> None:
+        """关闭面板相关后台任务；单项清理失败不妨碍后续模型下载有序暂停。"""
+        cleanups = (
+            ("关闭语音测试", self._close_voice_test),
+            ("关闭控制词测试", self._close_control_test),
+            (
+                "暂停模型下载",
+                lambda: self._model_downloads.shutdown(wait_seconds=2.0),
+            ),
+        )
+        for phase, cleanup in cleanups:
+            try:
+                cleanup()
+            except Exception as exc:
+                self._error_log.exception(
+                    "设置窗口退出清理失败 | 阶段=%s | 异常类型=%s",
+                    phase,
+                    type(exc).__name__,
+                )
+
 
 def enable_dpi_awareness() -> None:
     try:
@@ -601,7 +1066,7 @@ def main() -> None:
         height=680,
         min_size=(840, 560),
         resizable=True,
-        background_color="#F5F7FB",
+        background_color="#FFFFFF",
         text_select=True,
         zoomable=False,
     )
@@ -618,6 +1083,7 @@ def main() -> None:
             "并确认已安装 requirements.txt 中的依赖。"
         ) from exc
     finally:
+        api._shutdown()
         run_log.info("设置与历史记录窗口退出")
 
 
