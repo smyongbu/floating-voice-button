@@ -61,6 +61,14 @@ jobs:
           也可以设置 VOICE_INPUT_MODEL_REPOSITORY，让程序读取其他模型仓库。
           "@ | Set-Content -Encoding UTF8 (Join-Path $modelDir "模型放置说明.txt")
 
+      - name: 删除未使用的内置 VAD 模型
+        shell: pwsh
+        run: |
+          $vadModel = "dist\语点\_internal\faster_whisper\assets\silero_vad_v6.onnx"
+          if (Test-Path -LiteralPath $vadModel) {
+            Remove-Item -LiteralPath $vadModel -Force
+          }
+
       - name: 检查发布包不含模型
         shell: pwsh
         run: |
