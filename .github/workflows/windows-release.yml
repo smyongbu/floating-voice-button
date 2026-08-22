@@ -86,7 +86,7 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ inputs.version }}"
-          $zipName = "语点-Windows-$version.zip"
+          $zipName = "Yudian-Windows-$version.zip"
           Compress-Archive -Path "dist\语点" -DestinationPath $zipName -CompressionLevel Optimal
           (Get-FileHash -Algorithm SHA256 $zipName).Hash.ToLowerInvariant() | Set-Content -Encoding ASCII "$zipName.sha256"
           "RELEASE_ZIP=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
