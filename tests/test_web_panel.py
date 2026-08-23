@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from config_store import DEFAULT_REALTIME_MODEL, ZIPFORMER_REALTIME_MODEL
+from config_store import DEFAULT_CONFIG, DEFAULT_REALTIME_MODEL, ZIPFORMER_REALTIME_MODEL
 from history_store import HistoryEntry
 from settings_panel import WebSettingsApi, main as settings_panel_main
 
@@ -75,6 +75,19 @@ class WebSettingsApiTests(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertIn("Ctrl、Alt 或 Win", response["message"])
         update_config.assert_not_called()
+
+    def test_button_size_is_clamped_and_saved(self):
+        with (
+            patch("settings_panel.load_config", return_value=dict(DEFAULT_CONFIG)),
+            patch("settings_panel.update_config") as update_config,
+        ):
+            response = self.api.save_appearance(
+                "#2563EB", 80, button_size=96
+            )
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["data"]["size"], 80)
+        self.assertEqual(update_config.call_args.args[0]["button_size"], 80)
 
     def test_hotkey_test_reports_available_without_saving(self):
         with (
@@ -787,6 +800,7 @@ class WebPanelStaticTests(unittest.TestCase):
         self.assertIn("全局录音快捷键", self.html)
         self.assertIn("F1～F24", self.html)
         self.assertIn('"save_appearance", submitted.color, submitted.opacity, submitted.hotkey', self.javascript)
+        self.assertIn("submitted.autoPaste, submitted.size", self.javascript)
 
     def test_standby_mode_is_explicit_and_local_only(self):
         self.assertIn('id="standbyToggle"', self.html)

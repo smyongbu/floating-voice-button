@@ -197,6 +197,10 @@ def _normalize(raw: dict) -> dict:
         config["button_opacity"] = max(30, min(100, int(config.get("button_opacity", 100))))
     except (TypeError, ValueError):
         config["button_opacity"] = 100
+    try:
+        config["button_size"] = max(64, min(80, int(config.get("button_size", 72))))
+    except (TypeError, ValueError):
+        config["button_size"] = 72
     return config
 
 

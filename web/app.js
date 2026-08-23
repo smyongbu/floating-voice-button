@@ -42,10 +42,10 @@ const previewApi = {
       ok: true,
       data: {
         appearance: {
-          color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space",
+          color: "#2563EB", opacity: 100, size: 72, hotkey: "Ctrl+Alt+Space",
           standby_enabled: false, standby_confidence: 80,
           live_transcript_visible: true, auto_paste_enabled: true,
-          default_color: "#2563EB", default_opacity: 100,
+          default_color: "#2563EB", default_opacity: 100, default_size: 72,
           default_hotkey: "Ctrl+Alt+Space", default_standby_enabled: false,
           default_standby_confidence: 80,
           default_live_transcript_visible: true, default_auto_paste_enabled: true,
@@ -106,9 +106,9 @@ const COLOR_PATTERN = /^#[0-9A-F]{6}$/;
 const DEFAULT_REALTIME_MODEL = "streaming-paraformer-bilingual-zh-en";
 
 const state = {
-  saved: { color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
-  draft: { color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
-  defaults: { color: "#2563EB", opacity: 100, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
+  saved: { color: "#2563EB", opacity: 100, size: 72, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
+  draft: { color: "#2563EB", opacity: 100, size: 72, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
+  defaults: { color: "#2563EB", opacity: 100, size: 72, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
   appearanceBusy: false,
   model: {
     engine_id: "local:faster-whisper-small",
@@ -150,7 +150,7 @@ let recordingMotionQuery = null;
 function collectElements() {
   const ids = [
     "appearanceView", "localModelView", "onlineModelView", "historyView", "saveState", "colorPicker", "colorText",
-    "colorError", "opacityRange", "opacityOutput", "hotkeyInput", "hotkeyError",
+    "colorError", "opacityRange", "opacityOutput", "sizeRange", "sizeOutput", "hotkeyInput", "hotkeyError",
     "hotkeyTestButton", "hotkeyStatus", "standbyToggle", "transcriptToggle", "autoPasteToggle",
     "standbyConfidence", "standbyConfidenceValue", "controlWordTestButton", "controlWordTestStatus",
     "resetButton", "saveButton",
@@ -210,6 +210,11 @@ function clampOpacity(value) {
     return 100;
   }
   return Math.max(30, Math.min(100, numeric));
+}
+
+function clampSize(value) {
+  const numeric = Number.parseInt(value, 10);
+  return Number.isFinite(numeric) ? Math.max(64, Math.min(80, numeric)) : 72;
 }
 
 function parseHotkey(value) {
@@ -923,6 +928,7 @@ function isAppearanceValid() {
 function isAppearanceDirty() {
   return state.draft.color !== state.saved.color
     || state.draft.opacity !== state.saved.opacity
+    || state.draft.size !== state.saved.size
     || state.draft.hotkey !== state.saved.hotkey
     || state.draft.standby !== state.saved.standby
     || state.draft.transcript !== state.saved.transcript
@@ -942,6 +948,7 @@ function setAppearanceInputsDisabled(disabled) {
   elements.colorPicker.disabled = disabled;
   elements.colorText.disabled = disabled;
   elements.opacityRange.disabled = disabled;
+  elements.sizeRange.disabled = disabled;
   elements.hotkeyInput.disabled = disabled;
   elements.hotkeyTestButton.disabled = disabled;
   elements.standbyToggle.disabled = disabled;
@@ -960,8 +967,11 @@ function applyAppearancePreview() {
   const alpha = Math.max(0.3, Math.min(1, state.draft.opacity / 100));
   const progress = ((state.draft.opacity - 30) / 70) * 100;
   setDesignToken("--preview-opacity", String(alpha));
-  setDesignToken("--range-progress", `${progress}%`);
+  setDesignToken("--opacity-range-progress", `${progress}%`);
+  setDesignToken("--size-range-progress", `${((state.draft.size - 64) / 16) * 100}%`);
+  setDesignToken("--preview-button-scale", String(state.draft.size / 72));
   elements.opacityOutput.textContent = `${state.draft.opacity}%`;
+  elements.sizeOutput.textContent = `${state.draft.size} px`;
   for (const swatch of elements.swatches) {
     swatch.classList.toggle("is-active", swatch.dataset.color === state.draft.color);
   }
@@ -974,6 +984,7 @@ function syncAppearanceControls() {
     : state.saved.color;
   elements.colorText.value = state.draft.color;
   elements.opacityRange.value = String(state.draft.opacity);
+  elements.sizeRange.value = String(state.draft.size);
   elements.hotkeyInput.value = state.draft.hotkey;
   elements.standbyToggle.checked = state.draft.standby;
   elements.standbyToggle.parentElement.querySelector("b").textContent = state.draft.standby ? "开启" : "关闭";
@@ -983,6 +994,7 @@ function syncAppearanceControls() {
   elements.autoPasteToggle.parentElement.querySelector("b").textContent = state.draft.autoPaste ? "开启" : "关闭";
   elements.standbyConfidence.value = String(state.draft.confidence);
   elements.standbyConfidenceValue.textContent = `${state.draft.confidence}%`;
+  setDesignToken("--confidence-range-progress", `${((state.draft.confidence - 70) / 30) * 100}%`);
   elements.colorError.textContent = COLOR_PATTERN.test(state.draft.color)
     ? ""
     : "请输入 6 位十六进制颜色，例如 #2563EB。";
@@ -1055,12 +1067,13 @@ async function saveAppearance() {
   try {
     const response = await callApi(
       "save_appearance", submitted.color, submitted.opacity, submitted.hotkey,
-      submitted.standby, submitted.transcript, submitted.confidence, submitted.autoPaste
+      submitted.standby, submitted.transcript, submitted.confidence, submitted.autoPaste, submitted.size
     );
     const data = response.data || {};
     state.saved = {
       color: normalizeColor(data.color || state.draft.color),
       opacity: clampOpacity(data.opacity ?? state.draft.opacity),
+      size: clampSize(data.size ?? state.draft.size),
       hotkey: parseHotkey(data.hotkey || state.draft.hotkey).label,
       standby: data.standby_enabled === true,
       transcript: data.live_transcript_visible !== false,
@@ -1381,6 +1394,10 @@ function bindEvents() {
     state.draft.opacity = clampOpacity(event.target.value);
     applyAppearancePreview();
   });
+  elements.sizeRange.addEventListener("input", (event) => {
+    state.draft.size = clampSize(event.target.value);
+    applyAppearancePreview();
+  });
   elements.hotkeyInput.addEventListener("input", (event) => setDraftHotkey(event.target.value));
   elements.hotkeyInput.addEventListener("blur", () => setDraftHotkey(state.draft.hotkey, true));
   elements.hotkeyTestButton.addEventListener("click", testHotkey);
@@ -1499,10 +1516,12 @@ async function initializeBridge() {
     const appearance = response.data?.appearance || {};
     const color = normalizeColor(appearance.color || "#2563EB");
     const opacity = clampOpacity(appearance.opacity ?? 100);
+    const size = clampSize(appearance.size ?? 72);
     const hotkey = parseHotkey(appearance.hotkey || "Ctrl+Alt+Space");
     state.saved = {
       color: COLOR_PATTERN.test(color) ? color : "#2563EB",
       opacity,
+      size,
       hotkey: hotkey.valid ? hotkey.label : "Ctrl+Alt+Space",
       standby: appearance.standby_enabled === true,
       transcript: appearance.live_transcript_visible !== false,
@@ -1514,6 +1533,7 @@ async function initializeBridge() {
     state.defaults = {
       color: COLOR_PATTERN.test(defaultColor) ? defaultColor : "#2563EB",
       opacity: clampOpacity(appearance.default_opacity ?? 100),
+      size: clampSize(appearance.default_size ?? 72),
       hotkey: parseHotkey(appearance.default_hotkey || "Ctrl+Alt+Space").label,
       standby: appearance.default_standby_enabled === true,
       transcript: appearance.default_live_transcript_visible !== false,

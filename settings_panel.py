@@ -206,8 +206,10 @@ class WebSettingsApi:
                 "appearance": {
                     "color": str(config["button_color"]),
                     "opacity": int(config["button_opacity"]),
+                    "size": int(config["button_size"]),
                     "default_color": str(DEFAULT_CONFIG["button_color"]),
                     "default_opacity": int(DEFAULT_CONFIG["button_opacity"]),
+                    "default_size": int(DEFAULT_CONFIG["button_size"]),
                     "hotkey": str(config["global_hotkey"]),
                     "default_hotkey": str(DEFAULT_CONFIG["global_hotkey"]),
                     "standby_enabled": bool(config["standby_enabled"]),
@@ -788,6 +790,7 @@ class WebSettingsApi:
         live_transcript_visible: bool | None = None,
         standby_confidence: int | None = None,
         auto_paste_enabled: bool | None = None,
+        button_size: int | None = None,
     ) -> dict:
         operation_id = self._operation_id()
         try:
@@ -797,6 +800,9 @@ class WebSettingsApi:
             if not COLOR_PATTERN.fullmatch(normalized_color):
                 return _failure("颜色格式不正确，请输入例如 #2563EB。")
             normalized_opacity = max(30, min(100, int(opacity)))
+            normalized_size = max(64, min(80, int(
+                load_config()["button_size"] if button_size is None else button_size
+            )))
             if hotkey is None:
                 normalized_hotkey = str(load_config()["global_hotkey"])
             else:
@@ -829,6 +835,7 @@ class WebSettingsApi:
             update_config({
                 "button_color": normalized_color,
                 "button_opacity": normalized_opacity,
+                "button_size": normalized_size,
                 "global_hotkey": normalized_hotkey,
                 "standby_enabled": normalized_standby,
                 "live_transcript_visible": normalized_transcript,
@@ -836,13 +843,14 @@ class WebSettingsApi:
                 "auto_paste_enabled": normalized_auto_paste,
             })
             self._run_log.info(
-                "面板操作完成 | 编号=%s | 阶段=保存按钮设置 | 颜色=%s | 透明度=%d%% | 快捷键=%s | 自动输入=%s",
-                operation_id, normalized_color, normalized_opacity, normalized_hotkey,
+                "面板操作完成 | 编号=%s | 阶段=保存按钮设置 | 颜色=%s | 透明度=%d%% | 大小=%dpx | 快捷键=%s | 自动输入=%s",
+                operation_id, normalized_color, normalized_opacity, normalized_size, normalized_hotkey,
                 "开启" if normalized_auto_paste else "关闭",
             )
             return _success({
                 "color": normalized_color,
                 "opacity": normalized_opacity,
+                "size": normalized_size,
                 "hotkey": normalized_hotkey,
                 "standby_enabled": normalized_standby,
                 "live_transcript_visible": normalized_transcript,

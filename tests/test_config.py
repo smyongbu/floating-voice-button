@@ -24,8 +24,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIs(_normalize({"auto_paste_enabled": False})["auto_paste_enabled"], False)
 
     def test_button_size_is_in_supported_range(self):
-        self.assertGreaterEqual(app.DEFAULT_CONFIG["button_size"], 48)
-        self.assertLessEqual(app.DEFAULT_CONFIG["button_size"], 96)
+        self.assertGreaterEqual(app.DEFAULT_CONFIG["button_size"], 64)
+        self.assertLessEqual(app.DEFAULT_CONFIG["button_size"], 80)
 
     def test_appearance_defaults_are_valid(self):
         self.assertEqual(normalize_hex_color(app.DEFAULT_CONFIG["button_color"]), "#2563EB")

@@ -1296,6 +1296,27 @@ svg {
   grid-column: 1 / -1;
 }
 
+.opacity-control > #sizeOutput {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 56px;
+  white-space: nowrap;
+}
+
+.opacity-control > #opacityRange {
+  background: linear-gradient(to right, var(--accent) var(--opacity-range-progress, 100%), #dfe5ee var(--opacity-range-progress, 100%));
+}
+
+.opacity-control > #sizeRange {
+  grid-column: 1;
+  grid-row: 2;
+  background: linear-gradient(to right, var(--accent) var(--size-range-progress, 50%), #dfe5ee var(--size-range-progress, 50%));
+}
+
+.confidence-range-row > #standbyConfidence {
+  background: linear-gradient(to right, var(--accent) var(--confidence-range-progress, 33.333%), #dfe5ee var(--confidence-range-progress, 33.333%));
+}
+
 .color-picker {
   width: 36px;
   height: 36px;
@@ -1470,7 +1491,7 @@ svg {
 
 .setting-label { display: inline-flex; align-items: center; gap: 7px; font-weight: 640; }
 .help-tip { position: relative; display: inline-grid; width: 20px; height: 20px; padding: 0; place-items: center; color: var(--text-secondary); background: var(--surface-muted); border: 1px solid var(--border-strong); border-radius: 50%; font-size: var(--font-size-small); line-height: 1; }
-.help-tip::after { position: absolute; z-index: 20; top: calc(100% + 8px); left: 0; width: 260px; padding: 9px 11px; content: attr(data-tip); color: #fff; background: #172033; border-radius: 6px; box-shadow: none; font-size: var(--font-size-small); font-weight: 400; line-height: 1.55; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+.help-tip::after { position: absolute; z-index: 20; top: calc(100% + 8px); left: 0; width: 260px; padding: 9px 11px; content: attr(data-tip); color: #fff; background: #172033; border-radius: 6px; box-shadow: none; font-size: var(--font-size-small); font-weight: 400; line-height: 1.55; text-align: left; white-space: normal; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
 .help-tip:hover::after, .help-tip:focus-visible::after { opacity: 1; }
 .confidence-setting { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(180px, .35fr) minmax(0, .65fr); gap: 9px 28px; margin-top: 10px; padding-top: 18px; border-top: 1px solid var(--border); }
 .confidence-title-row { display: contents; }
@@ -2343,7 +2364,8 @@ kbd {
   min-height: 72px;
   justify-content: flex-start;
   gap: 14px;
-  padding: 5px 0;
+  padding: 5px 0 5px 8px;
+  overflow: visible;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -2379,6 +2401,9 @@ kbd {
 .preview-button {
   width: 64px;
   height: 64px;
+  transform: scale(var(--preview-button-scale, 1));
+  transform-origin: center;
+  transition: background-color 160ms var(--ease), opacity 160ms var(--ease), transform 160ms var(--ease);
 }
 
 .preview-layered-wave {
@@ -2458,14 +2483,16 @@ kbd {
 
 .opacity-control {
   grid-row: 2 / 4;
-  grid-template-columns: 160px 49px;
+  grid-template-columns: 153px 56px;
   width: 221px;
   max-width: 100%;
   align-self: end;
+  min-height: 72px;
 }
 
 .opacity-control > input[type="range"] {
-  width: 160px;
+  width: 153px;
+  margin-top: 0;
 }
 
 .swatches button.is-active::after {

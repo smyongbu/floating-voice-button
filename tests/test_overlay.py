@@ -62,8 +62,11 @@ class OverlayTests(unittest.TestCase):
         window._motion_enabled = True
         window.on_click = Mock()
         window.on_move = Mock()
+        window.on_open_panel = Mock()
+        window.on_open_logs = Mock()
         window.on_close = Mock()
         window.on_error = Mock()
+        window._context_menu = Mock()
         window._render = Mock()
         return window
 
@@ -101,6 +104,26 @@ class OverlayTests(unittest.TestCase):
         for state in ("idle", "standby", "busy", "recording"):
             with self.subTest(state=state):
                 self.assertEqual(button_render_color(state, configured), configured)
+
+    def test_apply_size_keeps_the_center_and_requests_render(self):
+        window = self.make_window()
+        window.size = 72
+        window.x = 100
+        window.y = 200
+        window._appearance_cache = {("cached",): Mock()}
+        window._request_render = Mock()
+        with patch.object(overlay.user32, "SetWindowPos", return_value=True) as resize:
+            applied = window._apply_size(80)
+
+        self.assertEqual(applied, 80)
+        self.assertEqual((window.x, window.y, window.size), (96, 196, 80))
+        self.assertEqual(window._appearance_cache, {})
+        resize.assert_called_once_with(
+            window.hwnd, None, 96, 196, 80, 80,
+            overlay.SWP_NOZORDER | overlay.SWP_NOACTIVATE,
+        )
+        window.on_move.assert_called_once_with(96, 196)
+        window._request_render.assert_called_once()
 
     def test_standby_uses_plain_recording_base(self):
         self.assertEqual(button_base_state("standby"), "recording")
@@ -618,7 +641,39 @@ class OverlayTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
 
-    def test_window_message_and_menu_win32_prototypes_are_explicit(self):
+    def test_owner_draw_menu_messages_are_delegated(self):
+        for message in (overlay.WM_DRAWITEM, overlay.WM_MEASUREITEM):
+            with self.subTest(message=message):
+                window = self.make_window()
+                window._context_menu.handle_message.return_value = True
+
+                self.assertEqual(window._wnd_proc(window.hwnd, message, 7, 9), 1)
+                window._context_menu.handle_message.assert_called_once_with(
+                    message, 7, 9
+                )
+
+    def test_context_menu_commands_keep_the_existing_callbacks(self):
+        for command in (0, 1, 2, 3):
+            with self.subTest(command=command):
+                window = self.make_window()
+                window._context_menu.show_at_cursor.return_value = command
+                with patch.object(
+                    overlay.user32, "PostMessageW", return_value=True
+                ) as post_message:
+                    window._show_menu()
+
+                self.assertEqual(
+                    window.on_open_panel.call_count, 1 if command == 1 else 0
+                )
+                self.assertEqual(
+                    window.on_open_logs.call_count, 1 if command == 2 else 0
+                )
+                if command == 3:
+                    post_message.assert_called_once_with(window.hwnd, WM_CLOSE, 0, 0)
+                else:
+                    post_message.assert_not_called()
+
+    def test_window_message_win32_prototypes_are_explicit(self):
         self.assertEqual(
             overlay.user32.ShowWindow.argtypes,
             [overlay.wintypes.HWND, ctypes.c_int],
@@ -634,11 +689,6 @@ class OverlayTests(unittest.TestCase):
         )
         self.assertIs(overlay.user32.GetMessageW.restype, overlay.wintypes.BOOL)
         self.assertIs(overlay.user32.DispatchMessageW.restype, overlay.LRESULT)
-        self.assertIs(overlay.user32.CreatePopupMenu.restype, overlay.wintypes.HMENU)
-        self.assertEqual(
-            overlay.user32.TrackPopupMenu.argtypes[-2:],
-            [overlay.wintypes.HWND, ctypes.POINTER(overlay.wintypes.RECT)],
-        )
 
     def test_render_requests_are_coalesced_and_new_update_during_render_is_kept(self):
         window = self.make_window()

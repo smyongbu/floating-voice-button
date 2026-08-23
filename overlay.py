@@ -12,6 +12,7 @@ from typing import Callable
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
+from context_menu import IndependentContextMenu, WM_DRAWITEM, WM_MEASUREITEM
 from global_hotkey import parse_hotkey
 
 
@@ -140,19 +141,6 @@ user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.UnregisterHotKey.restype = wintypes.BOOL
 user32.DestroyWindow.argtypes = [wintypes.HWND]
 user32.DestroyWindow.restype = wintypes.BOOL
-user32.CreatePopupMenu.argtypes = []
-user32.CreatePopupMenu.restype = wintypes.HMENU
-user32.AppendMenuW.argtypes = [
-    wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR,
-]
-user32.AppendMenuW.restype = wintypes.BOOL
-user32.TrackPopupMenu.argtypes = [
-    wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-    wintypes.HWND, ctypes.POINTER(wintypes.RECT),
-]
-user32.TrackPopupMenu.restype = wintypes.BOOL
-user32.DestroyMenu.argtypes = [wintypes.HMENU]
-user32.DestroyMenu.restype = wintypes.BOOL
 user32.GetDC.argtypes = [wintypes.HWND]
 user32.GetDC.restype = wintypes.HDC
 user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
@@ -199,16 +187,13 @@ WM_CAPTURECHANGED = 0x0215
 WM_HOTKEY = 0x0312
 WM_APP_RENDER = 0x8001
 WM_APP_HOTKEY_UPDATE = 0x8002
+WM_APP_SIZE_UPDATE = 0x8003
 MA_NOACTIVATE = 3
 HTCLIENT = 1
 HTTRANSPARENT = -1
 VK_LBUTTON = 0x01
 ULW_ALPHA = 0x00000002
 AC_SRC_ALPHA = 0x01
-MF_STRING = 0x0000
-MF_SEPARATOR = 0x0800
-TPM_RIGHTBUTTON = 0x0002
-TPM_RETURNCMD = 0x0100
 DRAG_TIMER_ID = 0xD6A9
 DRAG_TIMER_INTERVAL_MS = 16
 DRAG_THRESHOLD = 4
@@ -783,6 +768,8 @@ class LayeredButtonWindow:
         self._hotkey_lock = threading.Lock()
         self._hotkey_request_lock = threading.Lock()
         self._pending_hotkey: tuple[str, threading.Event, dict] | None = None
+        self._size_request_lock = threading.Lock()
+        self._pending_size: tuple[int, threading.Event, dict] | None = None
         self._owner_thread_id = int(kernel32.GetCurrentThreadId())
         self.state = "idle"
         self.waveform = [0.08] * 7
@@ -808,6 +795,10 @@ class LayeredButtonWindow:
         self._class_name = f"FloatingVoiceButton_{os.getpid()}"
         self._wndproc_ref = WNDPROC(self._wnd_proc)
         self._create_window()
+        self._context_menu = IndependentContextMenu(
+            self.hwnd,
+            on_cleanup_error=self.on_error,
+        )
         self.hotkey_registered, _reason = self.set_hotkey(hotkey)
 
     def _create_window(self) -> None:
@@ -830,6 +821,9 @@ class LayeredButtonWindow:
 
     def _wnd_proc(self, hwnd, message, wparam, lparam):
         try:
+            if message in (WM_DRAWITEM, WM_MEASUREITEM):
+                if self._context_menu.handle_message(message, wparam, lparam):
+                    return 1
             if message == WM_ERASEBKGND:
                 return 1
             if message == WM_MOUSEACTIVATE:
@@ -877,6 +871,18 @@ class LayeredButtonWindow:
                     hotkey, completed, result = request
                     result["value"] = self._apply_hotkey(hotkey)
                     completed.set()
+                return 0
+            if message == WM_APP_SIZE_UPDATE:
+                request = self._pending_size
+                self._pending_size = None
+                if request is not None:
+                    size, completed, result = request
+                    try:
+                        result["value"] = self._apply_size(size)
+                    except Exception as exc:
+                        result["error"] = exc
+                    finally:
+                        completed.set()
                 return 0
             if message == WM_APP_RENDER:
                 with self._render_request_lock:
@@ -989,17 +995,7 @@ class LayeredButtonWindow:
             self.on_click()
 
     def _show_menu(self) -> None:
-        menu = user32.CreatePopupMenu()
-        user32.AppendMenuW(menu, MF_STRING, 1, "设置与历史记录…")
-        user32.AppendMenuW(menu, MF_STRING, 2, "打开日志目录")
-        user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
-        user32.AppendMenuW(menu, MF_STRING, 3, "退出")
-        point = wintypes.POINT()
-        user32.GetCursorPos(ctypes.byref(point))
-        command = user32.TrackPopupMenu(
-            menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, point.x, point.y, 0, self.hwnd, None
-        )
-        user32.DestroyMenu(menu)
+        command = self._context_menu.show_at_cursor()
         if command == 1:
             self.on_open_panel()
         elif command == 2:
@@ -1232,6 +1228,43 @@ class LayeredButtonWindow:
             self.button_opacity = normalized_opacity
             self._appearance_cache.clear()
         self._request_render()
+
+    def _apply_size(self, size: int) -> int:
+        normalized_size = max(64, min(80, int(size)))
+        if normalized_size == self.size:
+            return normalized_size
+        delta = normalized_size - self.size
+        target_x = self.x - delta // 2
+        target_y = self.y - delta // 2
+        if not user32.SetWindowPos(
+            self.hwnd, None, target_x, target_y, normalized_size, normalized_size,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        ):
+            raise ctypes.WinError()
+        with self.state_lock:
+            self.size = normalized_size
+            self.x, self.y = target_x, target_y
+            self._appearance_cache.clear()
+        self.on_move(target_x, target_y)
+        self._request_render()
+        return normalized_size
+
+    def set_size(self, size: int) -> int:
+        if int(kernel32.GetCurrentThreadId()) == self._owner_thread_id:
+            return self._apply_size(size)
+        with self._size_request_lock:
+            completed = threading.Event()
+            result: dict[str, object] = {}
+            self._pending_size = (int(size), completed, result)
+            if not user32.PostMessageW(self.hwnd, WM_APP_SIZE_UPDATE, 0, 0):
+                self._pending_size = None
+                raise ctypes.WinError()
+            if not completed.wait(3.0):
+                self._pending_size = None
+                raise TimeoutError("悬浮按钮大小更新等待超时。")
+            if "error" in result:
+                raise result["error"]
+            return int(result.get("value", self.size))
 
     def set_hotkey(self, hotkey: str) -> tuple[bool, str]:
         if int(kernel32.GetCurrentThreadId()) == self._owner_thread_id:

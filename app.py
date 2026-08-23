@@ -120,7 +120,7 @@ class VoiceButtonApp:
             self.error_log.error(
                 "历史记录初始化失败 | 异常类型=%s", type(history_exc).__name__
             )
-        size = max(64, min(96, int(self.config["button_size"])))
+        size = max(64, min(80, int(self.config["button_size"])))
         screen_w = ctypes.windll.user32.GetSystemMetrics(0)
         screen_h = ctypes.windll.user32.GetSystemMetrics(1)
         x = self.config.get("position_x")
@@ -552,6 +552,12 @@ class VoiceButtonApp:
                         "外观设置已应用 | 颜色=%s | 透明度=%d%%",
                         new_appearance[0], new_appearance[1],
                     )
+                old_size = int(previous.get("button_size", DEFAULT_CONFIG["button_size"]))
+                new_size = int(updated.get("button_size", DEFAULT_CONFIG["button_size"]))
+                if new_size != old_size:
+                    applied_size = self.window.set_size(new_size)
+                    self.transcript_window.button_size = applied_size
+                    self.run_log.info("按钮大小已应用 | 大小=%dpx", applied_size)
                 old_hotkey = str(previous.get("global_hotkey", DEFAULT_CONFIG["global_hotkey"]))
                 new_hotkey = str(updated.get("global_hotkey", DEFAULT_CONFIG["global_hotkey"]))
                 if new_hotkey != old_hotkey:

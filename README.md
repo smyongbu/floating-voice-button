@@ -57,7 +57,7 @@
 右键悬浮按钮，选择“设置与历史记录…”：
 
 - 窗口是完整的本地网页界面，不使用 Tk/ttk 控件；页面资源不连接外网。
-- “按钮设置”可选择任意按钮颜色、把整体透明度设置为 30%～100%，并修改全局录音快捷键。保存后悬浮按钮会自动更新，无需重启。
+- “按钮设置”可选择任意按钮颜色、把整体透明度设置为 30%～100%、把按钮大小设置为 64～80 px，并修改全局录音快捷键。保存后悬浮按钮会自动更新，无需重启。
 - “识别后自动输入”默认开启；关闭后仍会识别、保存历史并复制到剪贴板，但不会自动把文字输入当前软件。
 - 可开启“待命模式”：麦克风使用 Windows 本机控制词识别持续监听“开始”和“结束”。空闲和待命状态都保留蓝青玻璃质感，并在中间显示紧凑的灰色双弧圆环；说“开始”后播放提示音并开始本机录音，说“结束”后完成转写，去除正文首尾的控制词，只保存到识别历史。也支持“开始录音、开始说话、停止录音、结束录音、结束说话”。
 - 待机、录音和处理中使用同一个自定义主色；Windows 端按共用调试页相同的 82% 主圆与 48% 原始背景图叠层绘制，背景层严格裁在圆形边界内，不再二次着色，也不显示圆外特效。灰色圆环与三层实时曲线使用 280 毫秒连续可逆形变，处理中保持当前过渡，不显示三点、空白中间帧或额外呼吸光环，也不会变红；Windows 关闭界面动画时直接显示目标状态。
@@ -87,6 +87,7 @@
 - `auto_paste_enabled`：识别后是否自动切回原软件并粘贴，默认开启；关闭时只保存历史并复制到剪贴板
 - `button_color`：按钮主色，格式如 `#2563EB`
 - `button_opacity`：按钮透明度，范围 30～100
+- `button_size`：按钮大小，范围 64～80 px，默认 72 px
 - `global_hotkey`：全局开始/停止录音快捷键，默认 `Ctrl+Alt+Space`；也可直接使用 `F1`～`F24`
 - `standby_enabled`：是否启用持续监听“开始／结束”的待命模式，默认关闭
 - `realtime_model`：边说边显示文字所用模型；默认 `streaming-paraformer-bilingual-zh-en`，也可设为 `zipformer-bilingual-zh-en-exp32-int8`
@@ -143,5 +144,5 @@
 
 ```powershell
 python -m unittest discover -s tests -v
-python -m py_compile app.py automation.py audio_level.py cloud_asr.py config_store.py credential_store.py global_hotkey.py history_store.py live_transcript.py local_asr.py logger.py model_download.py overlay.py realtime_asr.py recognition_router.py settings_panel.py standby_listener.py test_mode_signal.py
+python -m py_compile app.py automation.py audio_level.py cloud_asr.py config_store.py context_menu.py credential_store.py global_hotkey.py history_store.py live_transcript.py local_asr.py logger.py model_download.py overlay.py realtime_asr.py recognition_router.py settings_panel.py standby_listener.py test_mode_signal.py
 ```
