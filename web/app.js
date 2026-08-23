@@ -460,7 +460,25 @@ function syncModelControls(payload = state.model) {
   for (const input of elements.realtimeModelOptions.querySelectorAll('input[name="realtimeModel"]')) {
     const status = realtimeStatuses.get(input.value);
     input.disabled = status ? status.available !== true : false;
-    input.closest("label")?.classList.toggle("is-unavailable", input.disabled);
+    const label = input.closest("label");
+    const resourceState = String(status?.resource_status?.state || "not_started");
+    const progress = resourceState === "verifying" ? 100 : Number(status?.resource_status?.percent || 0);
+    label?.classList.toggle("is-unavailable", input.disabled);
+    label?.classList.toggle("is-downloadable", status?.downloadable === true && input.disabled);
+    label?.style.setProperty("--download-progress", `${Math.max(0, Math.min(100, progress))}%`);
+    label?.querySelector(".model-card-download")?.remove();
+    if (status?.downloadable === true && input.disabled && label) {
+      const text = { queued: "准备中", downloading: "下载中", verifying: "校验中", pausing: "暂停中", paused: "继续", failed: "重试" }[resourceState] || "下载";
+      const button = createTextElement("button", "model-card-download", text);
+      button.type = "button";
+      button.disabled = state.modelBusy || ["verifying", "pausing", "deleting"].includes(resourceState);
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        manageLocalModelResource(input.value, ["queued", "downloading"].includes(resourceState) ? "pause" : "start");
+      });
+      label.append(button);
+    }
   }
   const realtimeInput = elements.realtimeModelOptions.querySelector(`input[value="${realtimeModel}"]`);
   if (realtimeInput && !realtimeInput.disabled) realtimeInput.checked = true;
@@ -661,22 +679,21 @@ function renderLocalModels() {
 
 function scheduleModelResourcePoll() {
   window.clearTimeout(state.modelResourceTimer);
-  const models = state.model.local_models || [];
+  const models = [...(state.model.realtime_models || []), ...(state.model.local_models || [])];
   const active = models.some((model) => {
     const resourceState = String(model.resource_status?.state || "");
     return ["queued", "downloading", "verifying", "pausing", "deleting"].includes(resourceState);
   });
   if (!active || document.hidden) return;
   state.modelResourceTimer = window.setTimeout(async () => {
-    const activeModel = models.find((model) => {
+    const activeModels = models.filter((model) => {
       const resourceState = String(model.resource_status?.state || "");
       return ["queued", "downloading", "verifying", "pausing", "deleting"].includes(resourceState);
     });
-    const modelId = activeModel?.model_id;
-    if (!modelId) return;
+    if (!activeModels.length) return;
     try {
-      const response = await callApi("manage_local_model_resource", modelId, "status");
-      syncModelControls(response.data);
+      const responses = await Promise.all(activeModels.map((model) => callApi("manage_local_model_resource", model.model_id, "status")));
+      syncModelControls(responses.at(-1)?.data);
     } catch (error) {
       if (error.data) {
         syncModelControls(error.data);

@@ -861,6 +861,9 @@ class WebPanelStaticTests(unittest.TestCase):
         self.assertNotIn("recognition_mode", self.javascript)
         self.assertNotIn("download_local_model", self.javascript)
         self.assertNotIn('id="recognitionModeOptions"', self.html)
+        self.assertIn('status?.downloadable === true && input.disabled', self.javascript)
+        self.assertIn('manageLocalModelResource(input.value', self.javascript)
+        self.assertIn('...(state.model.realtime_models || [])', self.javascript)
 
     def test_model_resource_panel_is_not_shown_in_local_model_details(self):
         self.assertNotIn('resourcePanel.className = "model-resource-panel"', self.javascript)

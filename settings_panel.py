@@ -34,11 +34,10 @@ from logger import build_loggers
 from local_asr import (
     LocalModelRecognizer,
     choose_model_device,
-    get_downloadable_model_resources,
     get_local_model_catalog,
-    get_model_download_resource,
+    get_model_download_resource,  # 保留旧测试与外部补丁的兼容挂接点。
 )
-from model_download import DownloadSpec, ModelDownloadManager
+from model_resource_groups import GroupedModelDownloadManager, build_grouped_download_specs
 from realtime_asr import (
     RealtimeRecognizer,
     get_realtime_model_catalog,
@@ -106,19 +105,8 @@ class WebSettingsApi:
         self._control_test_result = {"active": False, "word": "", "confidence": 0}
         self._test_mode_lease = TestModeLease()
         self._active_test_kind = ""
-        download_specs = {}
-        for resource in get_downloadable_model_resources():
-            spec = DownloadSpec(
-                resource_id=str(resource["resource_id"]),
-                url=str(resource["url"]),
-                target_path=Path(str(resource["target_path"])),
-                version=str(resource["version"]),
-                total_size=int(resource["size_bytes"]),
-                sha256=str(resource["sha256"]),
-            )
-            download_specs[spec.resource_id] = spec
-        self._model_downloads = ModelDownloadManager(
-            download_specs,
+        self._model_downloads = GroupedModelDownloadManager(
+            build_grouped_download_specs(),
             run_log=self._run_log,
             error_log=self._error_log,
         )
@@ -271,8 +259,9 @@ class WebSettingsApi:
             model["language_support"] = str(
                 model.get("language_support") or "语言支持情况未说明"
             )
-            resource_id = str(model.get("resource_id") or "")
+            resource_id = str(model.get("model_id") or "")
             if resource_id in registered_resource_ids:
+                model["downloadable"] = True
                 if resource_id not in resource_statuses:
                     resource_statuses[resource_id] = self._model_downloads.status(resource_id)
                 # 同一资源可对应多个识别 profile；一次 payload 内必须使用同一快照。
@@ -306,12 +295,20 @@ class WebSettingsApi:
         with self._voice_test_lock:
             voice_test_active = self._voice_test_monitor is not None
             voice_test_model_id = self._voice_test_model_id
+        realtime_models = []
+        for incoming in get_realtime_model_catalog():
+            model = dict(incoming)
+            model_id = str(model.get("model_id") or "")
+            if model_id in registered_resource_ids:
+                model["downloadable"] = True
+                model["resource_status"] = self._model_downloads.status(model_id)
+            realtime_models.append(model)
         return {
             "engine_id": engine_id,
             "realtime_model": normalize_realtime_model(
                 current.get("realtime_model")
             ),
-            "realtime_models": get_realtime_model_catalog(),
+            "realtime_models": realtime_models,
             "fallback_model": str(current.get("fallback_model", "faster-whisper-small")),
             "preference": preference,
             "device": device_label,
@@ -411,13 +408,9 @@ class WebSettingsApi:
         registered_resource_ids = set(self._model_downloads.resource_ids)
         snapshots: dict[str, dict] = {}
         for label, model_id in model_roles:
-            resource = get_model_download_resource(model_id)
-            if resource is None:
-                # 随安装包提供的非下载模型保持原有可用性判断。
-                continue
-            resource_id = str(resource["resource_id"])
+            resource_id = str(model_id)
             if resource_id not in registered_resource_ids:
-                return f"{label}的下载资源尚未注册，请重新启动程序后重试。"
+                continue
             if resource_id not in snapshots:
                 snapshots[resource_id] = self._model_downloads.status(resource_id)
             snapshot = snapshots[resource_id]
@@ -435,24 +428,24 @@ class WebSettingsApi:
 
     def _resource_is_in_use(self, resource_id: str) -> bool:
         config = load_config()
-        referenced_model_ids = [str(config.get("fallback_model") or "")]
+        referenced_model_ids = [
+            str(config.get("fallback_model") or ""),
+            str(config.get("realtime_model") or ""),
+        ]
         engine_id = str(config.get("recognition_engine") or "")
         if engine_id.startswith("local:"):
             referenced_model_ids.append(engine_id.partition(":")[2])
-        for model_id in referenced_model_ids:
-            resource = get_model_download_resource(model_id)
-            if resource is not None and str(resource["resource_id"]) == resource_id:
-                return True
-        return False
+        return resource_id in referenced_model_ids
 
     @staticmethod
     def _resource_status_from_payload(payload: dict, resource_id: str) -> dict | None:
-        for model in payload.get("local_models") or []:
-            if str(model.get("resource_id") or "") != resource_id:
-                continue
-            snapshot = model.get("resource_status")
-            if isinstance(snapshot, dict):
-                return snapshot
+        for collection in ("realtime_models", "local_models"):
+            for model in payload.get(collection) or []:
+                if str(model.get("model_id") or "") != resource_id:
+                    continue
+                snapshot = model.get("resource_status")
+                if isinstance(snapshot, dict):
+                    return snapshot
         return None
 
     def manage_local_model_resource(
@@ -461,10 +454,7 @@ class WebSettingsApi:
         operation_id = self._operation_id()
         normalized_model = str(model_id or "").strip().lower()
         normalized_action = str(action or "status").strip().lower()
-        resource = get_model_download_resource(normalized_model)
-        if resource is None:
-            return _failure("这个模型没有可管理的按需下载资源。")
-        resource_id = str(resource["resource_id"])
+        resource_id = normalized_model
         if resource_id not in self._model_downloads.resource_ids:
             return _failure("模型下载资源尚未注册。")
         if normalized_action not in {"status", "start", "pause", "delete"}:
