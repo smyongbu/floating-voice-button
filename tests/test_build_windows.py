@@ -13,10 +13,26 @@ class WindowsBuildTests(unittest.TestCase):
         command = build_windows.pyinstaller_command(Path("python.exe"))
         icon_index = command.index("--icon")
         self.assertEqual(Path(command[icon_index + 1]).name, "app.ico")
+        version_index = command.index("--version-file")
+        self.assertEqual(Path(command[version_index + 1]).name, "windows-version-info.txt")
         self.assertIn("settings_panel", command)
         self.assertIn("clr", command)
         self.assertIn("--windowed", command)
 
+    def test_windows_version_resource_uses_application_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(build_windows, "PROJECT_ROOT", root):
+                version_file = build_windows.write_windows_version_file("v0.16.1")
+            content = version_file.read_text(encoding="utf-8")
+            self.assertIn("filevers=(0, 16, 1, 0)", content)
+            self.assertIn("StringStruct('FileVersion', '0.16.1')", content)
+            self.assertIn("StringStruct('ProductVersion', '0.16.1')", content)
+            self.assertIn("StringStruct('ProductName', '语点')", content)
+
+    def test_windows_version_tuple_rejects_invalid_version(self):
+        with self.assertRaises(ValueError):
+            build_windows.windows_version_tuple("v0.16")
     def test_lite_package_rejects_model_files(self):
         with tempfile.TemporaryDirectory() as directory:
             package = Path(directory)

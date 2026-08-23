@@ -37,12 +37,17 @@ jobs:
         shell: pwsh
         run: python -m unittest discover -s tests -v
 
+      - name: 生成 Windows 版本资源
+        shell: pwsh
+        run: python -c "from tools.build_windows import APP_VERSION, write_windows_version_file; write_windows_version_file(APP_VERSION)"
+
       - name: 编译语点
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean --onedir --windowed `
             --name "语点" `
             --icon "assets/app.ico" `
+            --version-file "build/windows-version-info.txt" `
             --add-data "web;web" `
             --add-data "assets;assets" `
             --hidden-import settings_panel `

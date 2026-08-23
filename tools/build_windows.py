@@ -69,6 +69,50 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def windows_version_tuple(version: str) -> tuple[int, int, int, int]:
+    parts = version.removeprefix("v").split(".")
+    if len(parts) not in (3, 4) or any(not part.isdigit() for part in parts):
+        raise ValueError(f"Windows 版本号格式无效：{version}")
+    numbers = tuple(int(part) for part in parts)
+    return (*numbers, 0) if len(numbers) == 3 else numbers
+
+
+def write_windows_version_file(version: str) -> Path:
+    numeric = windows_version_tuple(version)
+    display = version.removeprefix("v")
+    path = PROJECT_ROOT / "build" / "windows-version-info.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = f"""VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers={numeric},
+    prodvers={numeric},
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('080404B0', [
+        StringStruct('CompanyName', '语点'),
+        StringStruct('FileDescription', '语点 - 悬浮语音输入'),
+        StringStruct('FileVersion', '{display}'),
+        StringStruct('InternalName', '语点'),
+        StringStruct('LegalCopyright', 'Copyright © 2026'),
+        StringStruct('OriginalFilename', '语点.exe'),
+        StringStruct('ProductName', '语点'),
+        StringStruct('ProductVersion', '{display}')
+      ])
+    ]),
+    VarFileInfo([VarStruct('Translation', [2052, 1200])])
+  ]
+)
+"""
+    path.write_text(content, encoding="utf-8")
+    return path
+
 def default_model_repository() -> Path:
     configured = os.environ.get(MODEL_REPOSITORY_ENV)
     if configured:
@@ -156,6 +200,8 @@ def pyinstaller_command(python: Path) -> list[str]:
         APP_FOLDER_NAME,
         "--icon",
         str(PROJECT_ROOT / "assets" / "app.ico"),
+        "--version-file",
+        str(PROJECT_ROOT / "build" / "windows-version-info.txt"),
         "--add-data",
         f"{PROJECT_ROOT / 'web'};web",
         "--add-data",
@@ -246,6 +292,7 @@ def build(variant: str, version: str, python: Path) -> tuple[Path, Path]:
         icon = PROJECT_ROOT / "assets" / "app.ico"
         if not icon.is_file():
             raise RuntimeError(f"应用图标不存在：{icon}")
+        write_windows_version_file(version)
         subprocess.run(pyinstaller_command(python), cwd=PROJECT_ROOT, check=True)
         package_dir = PROJECT_ROOT / "dist" / APP_FOLDER_NAME
         vad_model = package_dir / "_internal" / "faster_whisper" / "assets" / "silero_vad_v6.onnx"
