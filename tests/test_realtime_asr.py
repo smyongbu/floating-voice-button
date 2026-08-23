@@ -1,6 +1,7 @@
 import time
 import types
 import unittest
+import threading
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -80,6 +81,45 @@ class _EndpointRecognizer(_FakeRecognizer):
 
 
 class RealtimeAsrTests(unittest.TestCase):
+    def test_sessions_created_from_one_recognizer_share_decode_lock(self):
+        recognizer = realtime_asr.RealtimeRecognizer.__new__(
+            realtime_asr.RealtimeRecognizer
+        )
+        recognizer._lock = threading.RLock()
+        recognizer._session_lock = threading.Lock()
+        recognizer._recognizer = _FakeRecognizer()
+        recognizer.load = Mock()
+        with patch.object(realtime_asr.RealtimeSession, "start"):
+            first = recognizer.create_session("one", Mock())
+            second = recognizer.create_session("two", Mock())
+        self.assertIs(first._decode_lock, second._decode_lock)
+
+    def test_idle_session_does_not_block_later_session_from_decoding(self):
+        first_stream_created = threading.Event()
+
+        class NotifyingRecognizer(_FakeRecognizer):
+            def create_stream(self):
+                first_stream_created.set()
+                return super().create_stream()
+
+        shared_lock = threading.Lock()
+        recognizer = NotifyingRecognizer()
+        first = realtime_asr.RealtimeSession(
+            "first", recognizer, Mock(), decode_lock=shared_lock
+        )
+        second = realtime_asr.RealtimeSession(
+            "second", recognizer, Mock(), decode_lock=shared_lock
+        )
+        first.start()
+        self.assertTrue(first_stream_created.wait(1.0))
+        second.start()
+        self.assertTrue(second.feed_pcm16(b"\x20\x03\xe0\xfc" * 320))
+        result = second.finish(timeout=1.0)
+        first.cancel()
+
+        self.assertTrue(result.is_final)
+        self.assertTrue(second.wait_closed(timeout=0.1))
+
     def test_source_run_uses_shared_realtime_model_without_copying(self):
         source = Path("O:/程序/共享模型仓库/streaming-paraformer")
         cache = Path("C:/Users/test/AppData/Local/FloatingVoiceButton/models/streaming-paraformer")

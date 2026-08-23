@@ -184,12 +184,14 @@ class WebSettingsApi:
                 "available": False,
                 "entries": [],
                 "signature": [0, 0],
+                "pending_count": 0,
             }
         entries, signature = self._store.snapshot(str(query))
         return {
             "available": True,
             "entries": [_serialize_entry(entry) for entry in entries],
             "signature": list(signature),
+            "pending_count": self._store.pending_count(),
         }
 
     def get_initial_state(self) -> dict:
@@ -422,8 +424,8 @@ class WebSettingsApi:
             state = str(snapshot.get("state") or "")
             if state == "completed" and snapshot.get("verified") is True:
                 continue
-            if state == "deleting":
-                return f"{label}正在删除，请等待完成后重新下载并校验。"
+            if state in {"deleting", "cancelling"}:
+                return f"{label}正在删除或取消，请等待完成后重新下载并校验。"
             if state in {"queued", "downloading", "verifying", "pausing"}:
                 return f"{label}仍在下载、校验或暂停处理中，请等待完整性校验完成。"
             if state == "failed":
@@ -462,7 +464,7 @@ class WebSettingsApi:
         resource_id = normalized_model
         if resource_id not in self._model_downloads.resource_ids:
             return _failure("模型下载资源尚未注册。")
-        if normalized_action not in {"status", "start", "pause", "delete"}:
+        if normalized_action not in {"status", "start", "pause", "cancel", "delete"}:
             return _failure("模型资源操作无效。")
         try:
             snapshot = None
@@ -470,6 +472,8 @@ class WebSettingsApi:
                 snapshot = self._model_downloads.start(resource_id)
             elif normalized_action == "pause":
                 snapshot = self._model_downloads.pause(resource_id)
+            elif normalized_action == "cancel":
+                snapshot = self._model_downloads.cancel(resource_id)
             elif normalized_action == "delete":
                 with self._model_resource_lock:
                     if self._resource_is_in_use(resource_id):
@@ -503,6 +507,12 @@ class WebSettingsApi:
                     "模型下载已暂停，已下载内容会保留。"
                     if state == "paused"
                     else "正在暂停模型下载，已下载内容会保留。"
+                )
+            elif normalized_action == "cancel":
+                message = (
+                    "模型下载已取消，未完成的临时文件已清理。"
+                    if state in {"not_started", "installed", "completed"}
+                    else "正在取消模型下载。"
                 )
             elif normalized_action == "delete":
                 message = (

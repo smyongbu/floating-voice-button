@@ -138,7 +138,18 @@ class HistoryStore:
                 "VALUES (?, ?, '', 'queued', ?, '', '')",
                 (safe_operation_id, created_at, safe_batch_id),
             )
-            if cursor.rowcount > 0:
+            prune_cursor = connection.execute(
+                """
+                DELETE FROM recognition_history
+                WHERE operation_id NOT IN (
+                    SELECT operation_id FROM recognition_history
+                    ORDER BY created_at DESC, rowid DESC
+                    LIMIT ?
+                )
+                """,
+                (self.limit,),
+            )
+            if cursor.rowcount > 0 or prune_cursor.rowcount > 0:
                 self._bump_revision(connection)
         return HistoryEntry(safe_operation_id, created_at, "", "queued", safe_batch_id)
 
@@ -171,7 +182,8 @@ class HistoryStore:
         parameters.append(str(operation_id))
         with self._connect() as connection:
             cursor = connection.execute(
-                f"UPDATE recognition_history SET {', '.join(assignments)} WHERE operation_id = ?",
+                f"UPDATE recognition_history SET {', '.join(assignments)} "
+                "WHERE operation_id = ? AND status IN ('queued', 'recognizing')",
                 tuple(parameters),
             )
             changed = cursor.rowcount > 0
@@ -257,6 +269,19 @@ class HistoryStore:
                 self._bump_revision(connection)
             return deleted
 
+    def delete_pending(self, operation_id: str) -> bool:
+        """只删除尚未完成的队列占位，避免覆盖退出恢复或已完成记录。"""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM recognition_history WHERE operation_id = ? "
+                "AND status IN ('queued', 'recognizing')",
+                (str(operation_id),),
+            )
+            deleted = cursor.rowcount > 0
+            if deleted:
+                self._bump_revision(connection)
+            return deleted
+
     def clear(self, expected_revision: int | None = None) -> int:
         with self._connect() as connection:
             if expected_revision is not None:
@@ -281,3 +306,27 @@ class HistoryStore:
                 "(SELECT value FROM history_meta WHERE key = 'revision')"
             ).fetchone()
         return int(row[0]), int(row[1]) if row and row[1] is not None else 0
+
+    def pending_count(self) -> int:
+        """返回全部排队中与识别中的记录数，不受搜索条件影响。"""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM recognition_history "
+                "WHERE status IN ('queued', 'recognizing')"
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def fail_pending(self, message: str) -> int:
+        """主程序启动时把上次异常退出遗留的待处理记录转为失败。"""
+        safe_message = str(message or "程序上次退出前未完成识别，请重新录制。")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE recognition_history "
+                "SET status = 'failed', preview_text = '', error_message = ? "
+                "WHERE status IN ('queued', 'recognizing')",
+                (safe_message,),
+            )
+            count = max(0, int(cursor.rowcount))
+            if count:
+                self._bump_revision(connection)
+            return count

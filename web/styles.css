@@ -2901,7 +2901,7 @@ kbd {
 }
 
 #localModelView.local-mode-v3 .realtime-model-row .mode-option {
-  min-height: 52px;
+  min-height: 64px;
   padding: 5px 36px 4px 12px;
 }
 

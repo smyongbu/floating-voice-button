@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
@@ -34,6 +35,155 @@ _CONTENT_RANGE_RE = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+|\*)$", re.IGNORECASE)
 _URL_WITH_QUERY_RE = re.compile(r"((?:https?|ftp)://[^\s?#]+)\?[^\s#]*", re.IGNORECASE)
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _VERIFICATION_WRITE_LOCK = threading.RLock()
+_DOWNLOAD_SLOT = threading.BoundedSemaphore(3)
+_CONTROL_JOIN_TIMEOUT_SECONDS = 5.0
+_TARGET_LEASES_LOCK = threading.Lock()
+_TARGET_LEASES: set[str] = set()
+
+
+def _extended_windows_path(path: Path) -> str:
+    normalized = os.path.normpath(os.path.abspath(str(path)))
+    if normalized.startswith("\\\\?\\"):
+        return normalized
+    if normalized.startswith("\\\\"):
+        return f"\\\\?\\UNC\\{normalized[2:]}"
+    return f"\\\\?\\{normalized}"
+
+
+def _windows_physical_target_identity(target_path: Path) -> str | None:
+    """解析最深已存在父目录，再拼回缺失部分以统一各种 Windows 路径别名。"""
+    if os.name != "nt":
+        return None
+    candidate = Path(os.path.abspath(str(target_path.parent)))
+    missing_parts: list[str] = []
+    while True:
+        try:
+            if candidate.is_dir():
+                break
+        except OSError:
+            pass
+        parent = candidate.parent
+        if parent == candidate:
+            return None
+        missing_parts.append(candidate.name)
+        candidate = parent
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    ]
+    create_file.restype = ctypes.c_void_p
+    get_final_path = kernel32.GetFinalPathNameByHandleW
+    get_final_path.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+    ]
+    get_final_path.restype = ctypes.c_uint32
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [ctypes.c_void_p]
+    close_handle.restype = ctypes.c_bool
+
+    handle = create_file(
+        _extended_windows_path(candidate),
+        0,
+        0x00000001 | 0x00000002 | 0x00000004,
+        None,
+        3,
+        0x02000000,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if not handle or int(handle) == invalid_handle:
+        return None
+    try:
+        required = int(get_final_path(handle, None, 0, 0))
+        if required <= 0:
+            return None
+        buffer = ctypes.create_unicode_buffer(required + 1)
+        written = int(get_final_path(handle, buffer, len(buffer), 0))
+        if written <= 0 or written >= len(buffer):
+            return None
+        canonical_parent = buffer.value
+    finally:
+        close_handle(handle)
+
+    suffix = list(reversed(missing_parts)) + [target_path.name]
+    canonical_target = os.path.join(canonical_parent, *suffix)
+    return (
+        "windows-final-path:"
+        f"{os.path.normcase(os.path.normpath(canonical_target))}"
+    )
+
+
+def _target_download_identity(target_path: Path) -> str:
+    physical_identity = _windows_physical_target_identity(target_path)
+    if physical_identity is not None:
+        return physical_identity
+    resolved = os.path.realpath(os.path.abspath(str(target_path)))
+    return f"resolved-path:{os.path.normcase(os.path.normpath(resolved))}"
+
+
+class _TargetDownloadLease:
+    """同一目标文件只允许一个线程或 Windows 进程执行下载与校验。"""
+
+    def __init__(self, target_path: Path) -> None:
+        identity = _target_download_identity(target_path)
+        self._key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        self._mutex_name = f"Global\\FloatingVoiceButton.Model.{self._key}"
+        self._handle: int | None = None
+        self._fallback_acquired = False
+
+    def __enter__(self) -> "_TargetDownloadLease":
+        if os.name != "nt":
+            with _TARGET_LEASES_LOCK:
+                if self._key in _TARGET_LEASES:
+                    raise _DownloadError("另一个语点任务正在处理同一模型文件，请稍后重试")
+                _TARGET_LEASES.add(self._key)
+                self._fallback_acquired = True
+            return self
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_mutex = kernel32.CreateMutexW
+        create_mutex.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+        create_mutex.restype = ctypes.c_void_p
+        wait_for_single_object = kernel32.WaitForSingleObject
+        wait_for_single_object.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        wait_for_single_object.restype = ctypes.c_uint32
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [ctypes.c_void_p]
+        close_handle.restype = ctypes.c_bool
+
+        handle = create_mutex(None, False, self._mutex_name)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        result = int(wait_for_single_object(handle, 0))
+        if result not in {0x00000000, 0x00000080}:
+            close_handle(handle)
+            if result == 0x00000102:
+                raise _DownloadError("另一个语点进程正在处理同一模型文件，请稍后重试")
+            raise ctypes.WinError(ctypes.get_last_error())
+        self._handle = int(handle)
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback) -> None:
+        if self._fallback_acquired:
+            with _TARGET_LEASES_LOCK:
+                _TARGET_LEASES.discard(self._key)
+            self._fallback_acquired = False
+        if self._handle is not None:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.ReleaseMutex(ctypes.c_void_p(self._handle))
+            kernel32.CloseHandle(ctypes.c_void_p(self._handle))
+            self._handle = None
 
 
 class ResourceVerificationError(RuntimeError):
@@ -244,6 +394,28 @@ def ensure_resource_verified(
     if cached is not None:
         return cached
 
+    try:
+        with _TargetDownloadLease(target):
+            cached = get_resource_verification(
+                resource_id, target, version, total_size, sha256
+            )
+            if cached is not None:
+                return cached
+            return _ensure_resource_verified_locked(
+                resource_id, target, version, total_size, sha256
+            )
+    except _DownloadError as exc:
+        raise ResourceVerificationError(str(exc)) from exc
+
+
+def _ensure_resource_verified_locked(
+    resource_id: str,
+    target: Path,
+    version: str,
+    total_size: int,
+    sha256: str,
+) -> dict[str, Any]:
+    """在目标互斥已持有时执行完整哈希与凭据更新。"""
     before = _regular_file_stat(target)
     if before is None:
         raise ResourceVerificationError("模型文件不存在或不是普通文件")
@@ -422,7 +594,7 @@ class ModelDownloadManager:
         with self._lock:
             if self._closed:
                 raise RuntimeError("模型下载管理器已关闭")
-            if record.state == "deleting":
+            if record.state in {"deleting", "cancelling"}:
                 return self._snapshot_locked(spec, record)
             if record.thread is not None and (
                 record.thread.is_alive() or record.state in self._ACTIVE_STATES
@@ -566,6 +738,132 @@ class ModelDownloadManager:
         """``status`` 的兼容别名。"""
         return self.status(resource_id)
 
+    def cancel(self, resource_id: str) -> dict[str, Any]:
+        """
+        取消当前下载并删除对应 ``.part``，保留已有完整模型与校验凭据。
+
+        取消操作异步完成，不递归删除目录，也不会触碰目标文件或相邻文件。
+        """
+        spec, record = self._get(resource_id)
+        response = None
+        previous_thread = None
+        operation_id = uuid.uuid4().hex[:12]
+        with self._lock:
+            if record.state in {"cancelling", "deleting"}:
+                return self._snapshot_locked(spec, record)
+            record.generation += 1
+            generation = record.generation
+            record.pause_event.set()
+            record.cancel_event.set()
+            record.state = "cancelling"
+            record.error = None
+            record.speed_bps = 0.0
+            record.remaining_seconds = None
+            record.operation_id = operation_id
+            response = record.response
+            record.response = None
+            previous_thread = record.thread
+            cancel_thread = threading.Thread(
+                target=self._cancel_worker,
+                args=(spec, generation, previous_thread, operation_id),
+                name=f"model-cancel-{spec.resource_id}",
+                daemon=True,
+            )
+            record.thread = cancel_thread
+            snapshot = self._snapshot_locked(spec, record)
+
+        self._close_response(response)
+        try:
+            cancel_thread.start()
+        except Exception as exc:
+            message = self._safe_error_message(exc)
+            with self._lock:
+                if record.generation == generation and record.thread is cancel_thread:
+                    record.state = "failed"
+                    record.error = message
+                    record.thread = previous_thread
+                snapshot = self._snapshot_locked(spec, record)
+            self._log(
+                self._error_log,
+                "error",
+                f"模型资源取消任务启动失败 | 编号={operation_id} | 资源={spec.resource_id} "
+                f"| 错误类型={type(exc).__name__} | 原因={message}",
+            )
+            return snapshot
+
+        self._log(
+            self._run_log,
+            "info",
+            f"模型资源取消任务开始 | 编号={operation_id} | 资源={spec.resource_id}",
+        )
+        return snapshot
+
+    def _cancel_worker(
+        self,
+        spec: DownloadSpec,
+        generation: int,
+        previous_thread: threading.Thread | None,
+        operation_id: str,
+    ) -> None:
+        try:
+            if (
+                previous_thread is not None
+                and previous_thread is not threading.current_thread()
+                and previous_thread.is_alive()
+            ):
+                previous_thread.join(timeout=_CONTROL_JOIN_TIMEOUT_SECONDS)
+                if previous_thread.is_alive():
+                    raise _DownloadError("取消下载等待超时，请稍后重试")
+            with _TargetDownloadLease(spec.target_path):
+                with self._lock:
+                    record = self._records[spec.resource_id]
+                    if record.generation != generation:
+                        return
+                    self._unlink_exact_file(spec.part_path)
+        except Exception as exc:
+            message = self._safe_error_message(exc)
+            with self._lock:
+                record = self._records[spec.resource_id]
+                if record.generation == generation:
+                    record.state = "failed"
+                    record.error = message
+                    record.thread = None
+                    record.response = None
+                    record.speed_bps = 0.0
+                    record.remaining_seconds = None
+            self._log(
+                self._error_log,
+                "error",
+                f"模型资源取消失败 | 编号={operation_id} | 资源={spec.resource_id} "
+                f"| 错误类型={type(exc).__name__} | 原因={message}",
+            )
+            return
+
+        with self._lock:
+            record = self._records[spec.resource_id]
+            if record.generation != generation:
+                return
+            target_size = self._regular_file_size(spec.target_path)
+            verified = target_size == spec.total_size and self._is_spec_verified(spec)
+            record.state = "completed" if verified else (
+                "installed" if target_size == spec.total_size else "not_started"
+            )
+            record.downloaded_bytes = spec.total_size if target_size == spec.total_size else 0
+            record.speed_bps = 0.0
+            record.remaining_seconds = 0.0 if verified else None
+            record.error = None
+            record.verified = verified
+            record.operation_id = operation_id
+            record.thread = None
+            record.response = None
+            record.pause_event = threading.Event()
+            record.cancel_event = threading.Event()
+        self._log(
+            self._run_log,
+            "info",
+            f"模型资源下载已取消 | 编号={operation_id} | 资源={spec.resource_id}",
+        )
+
     def delete(self, resource_id: str) -> dict[str, Any]:
         """
         后台停止对应任务，并仅删除目标、``.part`` 与对应校验凭据。
@@ -578,7 +876,7 @@ class ModelDownloadManager:
         previous_thread = None
         operation_id = uuid.uuid4().hex[:12]
         with self._lock:
-            if record.state == "deleting":
+            if record.state in {"deleting", "cancelling"}:
                 return self._snapshot_locked(spec, record)
             record.generation += 1
             generation = record.generation
@@ -641,13 +939,20 @@ class ModelDownloadManager:
                 and previous_thread is not threading.current_thread()
                 and previous_thread.is_alive()
             ):
-                previous_thread.join()
+                previous_thread.join(timeout=_CONTROL_JOIN_TIMEOUT_SECONDS)
+                if previous_thread.is_alive():
+                    raise _DownloadError("停止下载等待超时，未删除任何模型文件")
 
-            # 先让可信状态失效，再移除数据；只操作清单推导出的四个精确路径。
-            self._unlink_exact_file(spec.verification_temp_path)
-            self._unlink_exact_file(spec.verification_path)
-            self._unlink_exact_file(spec.part_path)
-            self._unlink_exact_file(spec.target_path)
+            with _TargetDownloadLease(spec.target_path):
+                with self._lock:
+                    record = self._records[spec.resource_id]
+                    if record.generation != generation:
+                        return
+                    # 先让可信状态失效，再移除数据；只操作清单推导出的四个精确路径。
+                    self._unlink_exact_file(spec.verification_temp_path)
+                    self._unlink_exact_file(spec.verification_path)
+                    self._unlink_exact_file(spec.part_path)
+                    self._unlink_exact_file(spec.target_path)
         except Exception as exc:
             message = self._safe_error_message(exc)
             with self._lock:
@@ -729,36 +1034,41 @@ class ModelDownloadManager:
         error_type: str | None = None
         operation_id = self._operation_id(spec.resource_id, generation)
         verified = False
+        slot_acquired = False
         try:
-            self._check_control_events(pause_event, cancel_event)
-            if self._regular_file_size(spec.target_path) == spec.total_size:
-                self._set_phase(spec, generation, "verifying", spec.total_size)
-                before = _regular_file_stat(spec.target_path)
-                digest = self._hash_file(spec.target_path, pause_event, cancel_event)
-                after = _regular_file_stat(spec.target_path)
-                if (
-                    before is None
-                    or after is None
-                    or before.st_size != after.st_size
-                    or before.st_mtime_ns != after.st_mtime_ns
-                ):
-                    raise _DownloadError("已安装模型在校验期间发生变化，请重试")
-                if digest == spec.sha256:
-                    self._write_spec_verification(spec, after)
-                    verified = True
-                    return
-                try:
-                    _remove_verification_files(spec.target_path)
-                except OSError:
-                    pass
-                self._log(
-                    self._error_log,
-                    "warning",
-                    f"已安装资源校验未通过，保留旧文件并重新下载 | 编号={operation_id} "
-                    f"| 资源={spec.resource_id} | 阶段=校验",
-                )
-            self._download_and_install(spec, generation, pause_event, cancel_event)
-            verified = True
+            with _TargetDownloadLease(spec.target_path):
+                while not slot_acquired:
+                    self._check_control_events(pause_event, cancel_event)
+                    slot_acquired = _DOWNLOAD_SLOT.acquire(timeout=0.1)
+                self._check_control_events(pause_event, cancel_event)
+                if self._regular_file_size(spec.target_path) == spec.total_size:
+                    self._set_phase(spec, generation, "verifying", spec.total_size)
+                    before = _regular_file_stat(spec.target_path)
+                    digest = self._hash_file(spec.target_path, pause_event, cancel_event)
+                    after = _regular_file_stat(spec.target_path)
+                    if (
+                        before is None
+                        or after is None
+                        or before.st_size != after.st_size
+                        or before.st_mtime_ns != after.st_mtime_ns
+                    ):
+                        raise _DownloadError("已安装模型在校验期间发生变化，请重试")
+                    if digest == spec.sha256:
+                        self._write_spec_verification(spec, after)
+                        verified = True
+                        return
+                    try:
+                        _remove_verification_files(spec.target_path)
+                    except OSError:
+                        pass
+                    self._log(
+                        self._error_log,
+                        "warning",
+                        f"已安装资源校验未通过，保留旧文件并重新下载 | 编号={operation_id} "
+                        f"| 资源={spec.resource_id} | 阶段=校验",
+                    )
+                self._download_and_install(spec, generation, pause_event, cancel_event)
+                verified = True
         except _DownloadPaused:
             outcome = "paused"
         except _DownloadCancelled:
@@ -767,10 +1077,6 @@ class ModelDownloadManager:
             outcome = "failed"
             error = self._safe_error_message(exc)
             error_type = type(exc).__name__
-            try:
-                self._unlink_exact_file(spec.part_path)
-            except OSError:
-                pass
         except Exception as exc:  # 后台线程的最后防线，避免静默退出
             if cancel_event.is_set():
                 outcome = "cancelled"
@@ -781,6 +1087,8 @@ class ModelDownloadManager:
                 error = self._safe_error_message(exc)
                 error_type = type(exc).__name__
         finally:
+            if slot_acquired:
+                _DOWNLOAD_SLOT.release()
             response = None
             with self._lock:
                 record = self._records[spec.resource_id]
@@ -902,6 +1210,7 @@ class ModelDownloadManager:
         ):
             raise _DownloadError("临时模型在校验期间发生变化，请重试")
         if digest != spec.sha256:
+            self._unlink_exact_file(spec.part_path)
             raise _ChecksumMismatch("SHA-256 完整性校验失败，已放弃该临时文件")
 
         self._check_control_events(pause_event, cancel_event)
@@ -1150,7 +1459,7 @@ class ModelDownloadManager:
         installed = installed_bytes == spec.total_size
         receipt_verified = installed and self._is_spec_verified(spec)
 
-        if record.state not in self._ACTIVE_STATES and record.state != "deleting":
+        if record.state not in self._ACTIVE_STATES and record.state not in {"deleting", "cancelling"}:
             if record.verified and not receipt_verified:
                 record.verified = False
                 if record.state == "completed":

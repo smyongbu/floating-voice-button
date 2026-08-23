@@ -116,6 +116,7 @@ class GroupedModelDownloadManager:
         if snapshots and all(item.get("state") == "completed" and item.get("verified") is True for item in snapshots): state = "completed"
         elif "failed" in states: state = "failed"
         elif "deleting" in states: state = "deleting"
+        elif "cancelling" in states: state = "cancelling"
         elif "pausing" in states: state = "pausing"
         elif states & {"queued", "downloading"}: state = "downloading"
         elif "verifying" in states: state = "verifying"
@@ -136,6 +137,10 @@ class GroupedModelDownloadManager:
 
     def pause(self, model_id: str) -> dict[str, Any]:
         for spec in self._groups[str(model_id)]: self._manager.pause(spec.resource_id)
+        return self.status(model_id)
+
+    def cancel(self, model_id: str) -> dict[str, Any]:
+        for spec in self._groups[str(model_id)]: self._manager.cancel(spec.resource_id)
         return self.status(model_id)
 
     def delete(self, model_id: str) -> dict[str, Any]:

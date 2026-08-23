@@ -126,6 +126,49 @@ class HistoryStoreTests(unittest.TestCase):
             self.assertEqual(failed.status, "failed")
             self.assertEqual(failed.error_message, "没有声音")
 
+    def test_pending_entries_obey_limit_and_pending_count_is_global(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = HistoryStore(Path(temp) / "history.db", limit=3)
+            for index in range(5):
+                store.reserve(f"pending-{index}", "batch")
+
+            self.assertEqual(store.signature()[0], 3)
+            self.assertEqual(store.pending_count(), 3)
+            self.assertEqual(store.list_entries("不会命中"), [])
+            self.assertEqual(store.pending_count(), 3)
+
+    def test_fail_pending_recovers_queued_and_recognizing_after_restart(self):
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "history.db"
+            store = HistoryStore(database)
+            store.reserve("queued", "batch")
+            store.reserve("recognizing", "batch")
+            store.mark_recognizing("recognizing", "未完成文字")
+            store.add("completed", "已经完成")
+
+            reopened = HistoryStore(database)
+            self.assertEqual(reopened.fail_pending("上次未完成"), 2)
+            self.assertEqual(reopened.pending_count(), 0)
+            self.assertEqual(reopened.get("queued").status, "failed")
+            self.assertEqual(reopened.get("recognizing").preview_text, "")
+            self.assertEqual(reopened.get("recognizing").error_message, "上次未完成")
+            self.assertEqual(reopened.get("completed").status, "completed")
+
+    def test_terminal_history_state_cannot_be_overwritten_by_racing_worker(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = HistoryStore(Path(temp) / "history.db")
+            store.reserve("failed", "batch")
+            self.assertTrue(store.fail("failed", "程序退出"))
+            self.assertFalse(store.complete("failed", "迟到的模型结果"))
+            self.assertFalse(store.mark_recognizing("failed", "迟到的预览"))
+            self.assertFalse(store.delete_pending("failed"))
+            self.assertEqual(store.get("failed").status, "failed")
+
+            store.reserve("completed", "batch")
+            self.assertTrue(store.complete("completed", "正常完成"))
+            self.assertFalse(store.fail("completed", "迟到的退出清理"))
+            self.assertEqual(store.get("completed").text, "正常完成")
+
 
 if __name__ == "__main__":
     unittest.main()

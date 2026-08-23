@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 from array import array
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -378,6 +379,7 @@ class RealtimeRecognizer:
         self.device_label = "CPU"
         self._recognizer: Any = None
         self._lock = threading.RLock()
+        self._session_lock = threading.Lock()
 
     @property
     def model_name(self) -> str:
@@ -448,6 +450,7 @@ class RealtimeRecognizer:
             on_update=on_update,
             queue_size=queue_size,
             max_stable_segments=max_stable_segments,
+            decode_lock=self._session_lock,
         )
         session.start()
         return session
@@ -463,6 +466,7 @@ class RealtimeSession:
         on_update: Callable[[RealtimeUpdate], None],
         queue_size: int = 96,
         max_stable_segments: int | None = None,
+        decode_lock: threading.Lock | None = None,
     ) -> None:
         self.operation_id = str(operation_id)
         self._recognizer = recognizer
@@ -481,6 +485,7 @@ class RealtimeSession:
         self._max_stable_segments = (
             None if max_stable_segments is None else max(0, int(max_stable_segments))
         )
+        self._decode_lock = decode_lock
         self._segment_start_sample = 0
         self._last_partial = ""
         self._final_text = ""
@@ -600,55 +605,65 @@ class RealtimeSession:
 
     def _run(self) -> None:
         try:
-            stream = self._recognizer.create_stream()
-            while not self._cancelled.is_set():
-                try:
-                    item = self._queue.get(timeout=0.2)
-                except queue.Empty:
-                    continue
-                if item is _END:
-                    break
-                pcm, sample_rate = item
-                samples = self._samples(pcm)
-                self._audio_samples += len(samples)
-                stream.accept_waveform(sample_rate, samples)
-                partial = self._decode_available(stream)
-                self._emit(partial)
-                if self._recognizer.is_endpoint(stream):
-                    segment_start_sample = self._segment_start_sample
-                    segment_end_sample = self._audio_samples
-                    self._append_stable_segment(partial)
-                    self._recognizer.reset(stream)
-                    self._emit(
-                        "",
-                        endpoint_text=partial,
-                        endpoint_reached=True,
-                        segment_start_sample=segment_start_sample,
-                        segment_end_sample=segment_end_sample,
-                    )
-                    self._segment_start_sample = segment_end_sample
-
-            if not self._cancelled.is_set():
-                stream.accept_waveform(16000, [0.0] * 4800)
-                stream.input_finished()
-                partial = self._decode_available(stream)
-                segment_start_sample = self._segment_start_sample
-                segment_end_sample = self._audio_samples
-                self._append_stable_segment(partial)
-                self._emit(
-                    "",
-                    final=True,
-                    endpoint_text=partial,
-                    endpoint_reached=True,
-                    segment_start_sample=segment_start_sample,
-                    segment_end_sample=segment_end_sample,
-                )
+            self._run_decode_stream()
         except Exception as exc:
             self._error = exc
         finally:
             with self._lock:
                 self._accepting = False
             self._done.set()
+
+    def _run_decode_stream(self) -> None:
+        if self._cancelled.is_set():
+            return
+        with self._decode_lock or nullcontext():
+            stream = self._recognizer.create_stream()
+        while not self._cancelled.is_set():
+            try:
+                item = self._queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if item is _END:
+                break
+            pcm, sample_rate = item
+            samples = self._samples(pcm)
+            self._audio_samples += len(samples)
+            with self._decode_lock or nullcontext():
+                stream.accept_waveform(sample_rate, samples)
+                partial = self._decode_available(stream)
+                endpoint_reached = self._recognizer.is_endpoint(stream)
+                if endpoint_reached:
+                    self._recognizer.reset(stream)
+            self._emit(partial)
+            if endpoint_reached:
+                segment_start_sample = self._segment_start_sample
+                segment_end_sample = self._audio_samples
+                self._append_stable_segment(partial)
+                self._emit(
+                    "",
+                    endpoint_text=partial,
+                    endpoint_reached=True,
+                    segment_start_sample=segment_start_sample,
+                    segment_end_sample=segment_end_sample,
+                )
+                self._segment_start_sample = segment_end_sample
+
+        if not self._cancelled.is_set():
+            with self._decode_lock or nullcontext():
+                stream.accept_waveform(16000, [0.0] * 4800)
+                stream.input_finished()
+                partial = self._decode_available(stream)
+            segment_start_sample = self._segment_start_sample
+            segment_end_sample = self._audio_samples
+            self._append_stable_segment(partial)
+            self._emit(
+                "",
+                final=True,
+                endpoint_text=partial,
+                endpoint_reached=True,
+                segment_start_sample=segment_start_sample,
+                segment_end_sample=segment_end_sample,
+            )
 
     def finish(self, timeout: float = 5.0) -> RealtimeUpdate:
         with self._lock:
@@ -679,7 +694,8 @@ class RealtimeSession:
             endpoint_reached=True,
         )
 
-    def cancel(self) -> None:
+    def request_cancel(self) -> None:
+        """只广播取消，不等待线程，供批量退出时统一控制总等待时间。"""
         with self._lock:
             self._accepting = False
         self._cancelled.set()
@@ -687,6 +703,9 @@ class RealtimeSession:
             self._queue.put_nowait(_END)
         except queue.Full:
             pass
+
+    def cancel(self) -> None:
+        self.request_cancel()
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=1.5)

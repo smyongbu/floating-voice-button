@@ -11,7 +11,8 @@ class LocalFlowTests(unittest.TestCase):
     def test_effective_audio_detection_rejects_digital_silence(self):
         self.assertFalse(app.has_effective_pcm16_audio(bytes(32000)))
         self.assertFalse(app.has_effective_pcm16_audio(b"\x01"))
-        self.assertTrue(app.has_effective_pcm16_audio(b"\x20\x03" * 160))
+        self.assertFalse(app.has_effective_pcm16_audio(b"\x20\x03" * 160))
+        self.assertTrue(app.has_effective_pcm16_audio(b"\x20\x03\xe0\xfc" * 1600))
 
     class _ImmediateThread:
         def __init__(self, target, *args, **kwargs):

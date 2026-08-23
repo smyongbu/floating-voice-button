@@ -50,7 +50,7 @@ const previewApi = {
           default_standby_confidence: 80,
           default_live_transcript_visible: true, default_auto_paste_enabled: true,
         },
-        history: { available: true, entries: [], signature: [0, 0] },
+        history: { available: true, entries: [], signature: [0, 0], pending_count: 0 },
         model: {
           engine_id: "local:qwen3-asr-1.7b-q5km", fallback_model: "faster-whisper-small",
           preference: "auto", realtime_model: previewRealtimeModel,
@@ -74,7 +74,7 @@ const previewApi = {
   async manage_local_model_resource(_modelId, action) {
     if (action === "start") previewDownloadState = "downloading";
     if (action === "pause") previewDownloadState = "paused";
-    if (action === "delete") {
+    if (["cancel", "delete"].includes(action)) {
       previewDownloadState = "not_started";
       previewDownloadPercent = 0;
     }
@@ -128,6 +128,7 @@ const state = {
   selectedId: null,
   signature: [0, 0],
   historyAvailable: true,
+  pendingCount: 0,
   historyRequest: 0,
   historyBusy: false,
   confirmAction: null,
@@ -463,16 +464,17 @@ function syncModelControls(payload = state.model) {
     input.disabled = status ? status.available !== true : false;
     const label = input.closest("label");
     const resourceState = String(status?.resource_status?.state || "not_started");
+    const resourceReady = resourceState === "completed" && status?.resource_status?.verified === true;
     const progress = resourceState === "verifying" ? 100 : Number(status?.resource_status?.percent || 0);
     label?.classList.toggle("is-unavailable", input.disabled);
-    label?.classList.toggle("is-downloadable", status?.downloadable === true && input.disabled);
+    label?.classList.toggle("is-downloadable", status?.downloadable === true && input.disabled && !resourceReady);
     label?.style.setProperty("--download-progress", `${Math.max(0, Math.min(100, progress))}%`);
     label?.querySelector(".model-card-actions")?.remove();
-    if (status?.downloadable === true && input.disabled && label) {
-      const text = { queued: "准备中", downloading: "下载中", verifying: "校验中", pausing: "暂停中", paused: "继续", failed: "重试" }[resourceState] || "下载";
+    if (status?.downloadable === true && input.disabled && !resourceReady && label) {
+      const text = { queued: "准备中", downloading: "下载中", verifying: "校验中", pausing: "暂停中", paused: "继续", cancelling: "取消中", failed: "重试" }[resourceState] || "下载";
       const button = createTextElement("button", "model-card-download", text);
       button.type = "button";
-      button.disabled = state.modelBusy || ["verifying", "pausing", "deleting"].includes(resourceState);
+      button.disabled = state.modelBusy || ["verifying", "pausing", "cancelling", "deleting"].includes(resourceState);
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -481,14 +483,14 @@ function syncModelControls(payload = state.model) {
       const actions = document.createElement("span");
       actions.className = "model-card-actions";
       actions.append(button);
-      if (["queued", "downloading", "paused", "pausing"].includes(resourceState)) {
+      if (["queued", "downloading", "verifying", "paused", "pausing", "cancelling"].includes(resourceState)) {
         const cancelButton = createTextElement("button", "model-card-cancel", "取消下载");
         cancelButton.type = "button";
-        cancelButton.disabled = state.modelBusy || resourceState === "pausing";
+        cancelButton.disabled = state.modelBusy || ["pausing", "cancelling"].includes(resourceState);
         cancelButton.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          manageLocalModelResource(input.value, "delete");
+          manageLocalModelResource(input.value, "cancel");
         });
         actions.append(cancelButton);
       }
@@ -531,6 +533,8 @@ function renderEngineOptions() {
   const localEngines = [];
   const onlineEngines = [];
   for (const model of state.model.local_models || []) {
+    const resourceReady = model.resource_status?.state === "completed"
+      && model.resource_status?.verified === true;
     localEngines.push({
       id: `local:${model.model_id}`,
       name: model.name,
@@ -538,7 +542,7 @@ function renderEngineOptions() {
       status: model.status || (model.available ? "已安装" : "不可用"),
       modelId: model.model_id,
       available: model.available === true,
-      downloadable: model.downloadable === true,
+      downloadable: model.downloadable === true && !resourceReady,
       resourceStatus: model.resource_status || null,
       disabled: !model.available || (
         state.model.voice_test_active === true
@@ -603,12 +607,13 @@ function renderEngineGroup(container, engines, inputName, stateKey) {
         paused: "继续下载",
         failed: "重试下载",
         deleting: "删除中",
+        cancelling: "取消中",
       };
       const downloadButton = createTextElement(
         "button", "model-card-download", labelByState[resourceState] || "下载",
       );
       downloadButton.type = "button";
-      downloadButton.disabled = state.modelBusy || ["verifying", "pausing", "deleting"].includes(resourceState);
+      downloadButton.disabled = state.modelBusy || ["verifying", "pausing", "cancelling", "deleting"].includes(resourceState);
       downloadButton.title = ["queued", "downloading"].includes(resourceState) ? "点击暂停下载" : "";
       downloadButton.addEventListener("click", (event) => {
         event.preventDefault();
@@ -619,14 +624,14 @@ function renderEngineGroup(container, engines, inputName, stateKey) {
       const actions = document.createElement("span");
       actions.className = "model-card-actions";
       actions.append(downloadButton);
-      if (["queued", "downloading", "paused", "pausing"].includes(resourceState)) {
+      if (["queued", "downloading", "verifying", "paused", "pausing", "cancelling"].includes(resourceState)) {
         const cancelButton = createTextElement("button", "model-card-cancel", "取消下载");
         cancelButton.type = "button";
-        cancelButton.disabled = state.modelBusy || resourceState === "pausing";
+        cancelButton.disabled = state.modelBusy || ["pausing", "cancelling"].includes(resourceState);
         cancelButton.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          manageLocalModelResource(engine.modelId, "delete");
+          manageLocalModelResource(engine.modelId, "cancel");
         });
         actions.append(cancelButton);
       }
@@ -675,6 +680,7 @@ function renderLocalModels() {
     completed: "已安装",
     failed: "下载失败",
     deleting: "正在删除",
+    cancelling: "正在取消",
   }[resourceState];
   const status = createTextElement(
     "span",
@@ -711,13 +717,13 @@ function scheduleModelResourcePoll() {
   const models = [...(state.model.realtime_models || []), ...(state.model.local_models || [])];
   const active = models.some((model) => {
     const resourceState = String(model.resource_status?.state || "");
-    return ["queued", "downloading", "verifying", "pausing", "deleting"].includes(resourceState);
+    return ["queued", "downloading", "verifying", "pausing", "cancelling", "deleting"].includes(resourceState);
   });
   if (!active || document.hidden) return;
   state.modelResourceTimer = window.setTimeout(async () => {
     const activeModels = models.filter((model) => {
       const resourceState = String(model.resource_status?.state || "");
-      return ["queued", "downloading", "verifying", "pausing", "deleting"].includes(resourceState);
+      return ["queued", "downloading", "verifying", "pausing", "cancelling", "deleting"].includes(resourceState);
     });
     if (!activeModels.length) return;
     try {
@@ -749,8 +755,7 @@ async function manageLocalModelResource(modelId, action) {
     elements.modelTestStatus.classList.add("is-error");
   } finally {
     state.modelBusy = false;
-    renderLocalModels();
-    scheduleModelResourcePoll();
+    syncModelControls(state.model);
   }
 }
 
@@ -1222,7 +1227,7 @@ function renderHistory() {
     fragment.append(button);
   }
   elements.historyList.replaceChildren(fragment);
-  const activeCount = state.entries.filter((entry) => ["queued", "recognizing"].includes(entry.status)).length;
+  const activeCount = state.pendingCount;
   elements.historyBatchStatus.hidden = activeCount === 0;
   elements.historyBatchStatus.textContent = activeCount ? `待处理 ${activeCount} 段` : "";
 
@@ -1278,6 +1283,7 @@ function normalizeHistoryPayload(payload) {
   }
   const signature = Array.isArray(payload?.signature) ? payload.signature : [state.entries.length, 0];
   state.signature = [Number(signature[0] || 0), Number(signature[1] || 0)];
+  state.pendingCount = Math.max(0, Number(payload?.pending_count || 0));
   state.historyAvailable = payload?.available !== false;
 }
 
