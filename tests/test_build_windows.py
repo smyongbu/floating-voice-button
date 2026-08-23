@@ -64,7 +64,7 @@ class WindowsBuildTests(unittest.TestCase):
                 archive, checksum = build_windows.archive_package(
                     package,
                     "lite",
-                    "v0.16.0",
+                    "v0.16.1",
                 )
             self.assertIn(archive.name, checksum.read_text(encoding="utf-8"))
 

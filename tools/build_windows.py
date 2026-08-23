@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-APP_VERSION = "v0.16.0"
+APP_VERSION = "v0.16.1"
 APP_FOLDER_NAME = "语点"
 MODEL_REPOSITORY_ENV = "VOICE_INPUT_MODEL_REPOSITORY"
 FIRST_INSTALL_MODEL_IDS = (

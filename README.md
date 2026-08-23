@@ -17,7 +17,7 @@
 
 一个可选择本地模型或国内在线服务的 Windows 悬浮语音输入按钮。设置与历史记录使用本地 HTML、CSS、JavaScript 和系统 WebView2；悬浮层使用 Windows 逐像素 Alpha 分层窗口。默认使用本地识别，不会上传录音。项目内另有 `android-app` 安卓悬浮版源码与安装包。
 
-当前 Windows 源码版本为 `0.16.0`。
+当前 Windows 源码版本为 `0.16.1`。
 
 ## 共用悬浮按钮调试页
 
