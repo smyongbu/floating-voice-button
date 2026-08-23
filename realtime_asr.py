@@ -26,6 +26,10 @@ PROJECT_DIR = Path(__file__).resolve().parent
 MODEL_REPOSITORY_ENV = "VOICE_INPUT_MODEL_REPOSITORY"
 
 
+def _running_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
 def _default_model_repository() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent / "models"
@@ -172,9 +176,17 @@ def _model_paths(model_id: str) -> tuple[str, dict[str, Any], Path, Path]:
 def install_realtime_model_locally(
     model_id: str = DEFAULT_REALTIME_MODEL,
 ) -> Path:
-    """校验共享模型后原子复制到当前电脑，避免实时识别依赖网络读取。"""
+    """源码版校验后直读共享仓库；编译版复制到正式缓存。"""
     normalized, spec, source_dir, local_dir = _model_paths(model_id)
     files = spec["files"]
+    if not _running_frozen():
+        for name, (size, digest) in files.items():
+            if not _valid_model_file(source_dir / name, size, digest):
+                raise FileNotFoundError(
+                    f"共享模型仓库中的实时模型 {normalized} 文件缺失或校验失败：{name}"
+                )
+        return source_dir
+
     if all(
         _valid_model_file(local_dir / name, size, digest)
         for name, (size, digest) in files.items()
@@ -213,7 +225,7 @@ def get_realtime_model_status(
     normalized, spec, source_dir, local_dir = _model_paths(model_id)
     files = spec["files"]
     source_ready = _complete_by_size(source_dir, files)
-    local_ready = _complete_by_size(local_dir, files)
+    local_ready = _running_frozen() and _complete_by_size(local_dir, files)
     try:
         import sherpa_onnx
 
@@ -231,7 +243,11 @@ def get_realtime_model_status(
         "size_bytes": sum(item[0] for item in files.values()),
         "status": "已就绪" if available else "不可用",
         "status_message": (
-            f"{spec['name']} 已就绪，可显示中文、英文和中英混说文字。"
+            (
+                f"{spec['name']} 已就绪，直接从共享模型仓库读取。"
+                if not _running_frozen()
+                else f"{spec['name']} 已就绪，可显示中文、英文和中英混说文字。"
+            )
             if available
             else f"{spec['name']} 文件或 sherpa-onnx 运行组件不完整。"
         ),

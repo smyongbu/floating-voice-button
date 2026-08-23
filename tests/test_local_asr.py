@@ -12,6 +12,36 @@ import local_asr
 
 
 class LocalAsrTests(unittest.TestCase):
+    def setUp(self):
+        # 既有安装器测试覆盖编译版复制/校验流程；源码直读另有专门测试。
+        self._frozen_patch = patch.object(local_asr, "_running_frozen", return_value=True)
+        self._frozen_patch.start()
+        self.addCleanup(self._frozen_patch.stop)
+
+    def test_source_run_reads_shared_repository_without_using_local_cache(self):
+        source = Path("O:/程序/共享模型仓库/faster-whisper-small")
+        cache = Path("C:/Users/test/AppData/Local/FloatingVoiceButton/models/faster-whisper-small")
+        with (
+            patch.object(local_asr, "_running_frozen", return_value=False),
+            patch.object(local_asr, "_model_directories", return_value=(source, cache)),
+            patch.object(local_asr, "_missing_files", return_value=[]),
+            patch.object(local_asr, "_ensure_download_resource_verified") as verify,
+        ):
+            self.assertEqual(local_asr.install_model_locally(), source)
+            verify.assert_called_once_with(local_asr.MODEL_NAME, source)
+
+    def test_source_status_ignores_complete_local_cache(self):
+        with (
+            patch.object(local_asr, "_running_frozen", return_value=False),
+            patch.object(local_asr, "_missing_files", side_effect=[[], []]),
+            patch.object(local_asr, "_runtime_status", return_value=(True, "运行组件可用。")),
+        ):
+            status = local_asr.get_local_model_status(local_asr.MODEL_NAME)
+        self.assertTrue(status["available"])
+        self.assertFalse(status["cached_locally"])
+        self.assertFalse(status["downloadable"])
+        self.assertIn("共享模型仓库", status["status_message"])
+
     def test_windows_models_use_central_shared_repository(self):
         expected_root = local_asr.PROJECT_DIR.parents[1] / "共享模型仓库"
         self.assertEqual(local_asr.MODEL_SOURCE_ROOT, expected_root)

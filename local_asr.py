@@ -24,6 +24,10 @@ PROJECT_DIR = Path(__file__).resolve().parent
 MODEL_REPOSITORY_ENV = "VOICE_INPUT_MODEL_REPOSITORY"
 
 
+def _running_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
 def _default_model_repository() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent / "models"
@@ -371,10 +375,10 @@ def get_local_model_status(model_id: str) -> dict[str, Any]:
     source_missing = _missing_files(metadata["id"], source_dir)
     local_missing = _missing_files(metadata["id"], local_dir)
     bundled = not source_missing
-    cached_locally = not local_missing
+    cached_locally = _running_frozen() and not local_missing
     runtime_ready, runtime_message = _runtime_status(metadata)
     verification = _download_verification_spec(metadata["id"], local_dir)
-    downloadable = verification is not None
+    downloadable = _running_frozen() and verification is not None
     verified = bool(
         verification is not None
         and cached_locally
@@ -390,7 +394,10 @@ def get_local_model_status(model_id: str) -> dict[str, Any]:
     usable_files = bundled or cached_locally and (not downloadable or verified)
     available = usable_files and runtime_ready
 
-    if cached_locally and (not downloadable or verified) and runtime_ready:
+    if not _running_frozen() and bundled and runtime_ready:
+        status = "已安装"
+        status_message = "模型直接从共享模型仓库读取，不占用额外的系统盘模型缓存。"
+    elif cached_locally and (not downloadable or verified) and runtime_ready:
         status = "已安装"
         status_message = (
             "模型已通过固定版本和 SHA-256 完整性校验，可以离线使用。"
@@ -442,6 +449,9 @@ def get_local_model_status(model_id: str) -> dict[str, Any]:
 
 def get_model_download_resource(model_id: str) -> dict[str, Any] | None:
     """返回按需下载所需的内部资源描述；两个 1.7B 配置共享同一目标。"""
+    if not _running_frozen():
+        # 源码版直接消费共享仓库，不允许下载器写入或删除规范源。
+        return None
     metadata = _model_metadata(model_id)
     download = metadata.get("download") or {}
     _source_dir, local_dir = _model_directories(metadata["id"])
@@ -475,13 +485,22 @@ def get_local_model_catalog() -> list[dict[str, Any]]:
 
 
 def install_model_locally(model_id: str = MODEL_NAME) -> Path:
-    """按模型文件清单逐文件原子复制到本机目录。"""
+    """源码版直读共享仓库；编译版按清单复制到正式缓存。"""
     metadata = _model_metadata(model_id)
     source_dir, local_dir = _model_directories(metadata["id"])
     source_paths = _required_paths(metadata["id"], source_dir)
     target_paths = _required_paths(metadata["id"], local_dir)
 
     missing = _missing_files(metadata["id"], source_dir)
+    if not _running_frozen():
+        if missing:
+            missing_text = "、".join(missing)
+            raise FileNotFoundError(
+                f"共享模型仓库中的“{metadata['name']}”不完整，缺少：{missing_text}。"
+            )
+        _ensure_download_resource_verified(metadata["id"], source_dir)
+        return source_dir
+
     local_missing = _missing_files(metadata["id"], local_dir)
     if not local_missing and missing:
         # 已完成本机缓存后，即使共享目录临时离线也应继续可用。

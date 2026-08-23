@@ -17,7 +17,7 @@
 
 一个可选择本地模型或国内在线服务的 Windows 悬浮语音输入按钮。设置与历史记录使用本地 HTML、CSS、JavaScript 和系统 WebView2；悬浮层使用 Windows 逐像素 Alpha 分层窗口。默认使用本地识别，不会上传录音。项目内另有 `android-app` 安卓悬浮版源码与安装包。
 
-当前 Windows 源码版本为 `0.16.5`。
+当前 Windows 源码版本为 `0.16.6`。
 
 ## 共用悬浮按钮调试页
 
@@ -74,7 +74,7 @@
 - Windows 10 或 Windows 11
 - 标准 CPython 3.11（当前正式依赖的已验证版本），安装时勾选“添加到 PATH”；启动脚本会优先使用默认位置的 Python 3.11。本机 Anaconda Python 3.12 加载 `transcribe.cpp 0.2.1` 原生组件时会异常退出，不要用它启动本程序
 - Microsoft Edge WebView2 Runtime（Windows 11 通常已自带；缺少时需先安装）
-- Windows 所有现用模型统一以 `O:\程序\共享模型仓库` 为规范源；源码通过相对于共同上级目录的路径定位，也可用 `VOICE_INPUT_MODEL_REPOSITORY` 覆盖。源码运行时如需复制到 `%LOCALAPPDATA%\FloatingVoiceButton\models`，该副本仅是可重建的开发缓存。编译后的正式 EXE 改用 `%LOCALAPPDATA%\FloatingVoiceButton\release-models-v1`，不会读取开发缓存；删除任何消费缓存都不会删除共享仓库。
+- Windows 所有现用模型统一以 `O:\程序\共享模型仓库` 为规范源；源码通过相对于共同上级目录的路径定位，也可用 `VOICE_INPUT_MODEL_REPOSITORY` 覆盖。源码运行时直接读取共享仓库，不再复制或识别 `%LOCALAPPDATA%\FloatingVoiceButton\models` 中的旧开发缓存；共享仓库不可用时会明确显示模型不可用。编译后的正式 EXE 仍使用 `%LOCALAPPDATA%\FloatingVoiceButton\release-models-v1`，不会读取旧开发缓存；删除任何消费缓存都不会删除共享仓库。
 - 不带模型轻量升级版不会把模型编译进 EXE 或 ZIP。解压后，程序只从 `语点.exe` 旁边独立的 `models` 文件夹和正式版缓存读取模型；编译版不会使用开发专用的 `VOICE_INPUT_MODEL_REPOSITORY` 覆盖或 `%LOCALAPPDATA%\FloatingVoiceButton\models`。
 - 编译版必须先完整解压再运行，既可放在本机磁盘，也可从 NAS 或 `\\服务器\共享` 这类 UNC 网络路径启动。网络共享兼容依赖 `语点.exe` 同目录的 `语点.exe.config`，升级、复制或整理文件时不要删除；仍不能直接从 ZIP 内运行。
 - Windows 编译版分为两种：第一次安装优先下载“首次安装版”，它在 `models` 文件夹附带 Faster-Whisper Small 与 Streaming Paraformer；以后升级可只下载“不带模型轻量升级版”，直接复用电脑上已经安装的模型，不重复下载模型文件。

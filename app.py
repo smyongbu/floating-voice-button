@@ -161,11 +161,15 @@ class VoiceButtonApp:
         self._config_stamp = self._read_config_stamp()
         threading.Thread(target=self._watch_config, name="配置监测", daemon=True).start()
         self.run_log.info("应用启动 | 版本=%s | 界面=逐像素Alpha分层窗口", APP_VERSION)
-        self.run_log.info(
-            "模型存储已初始化 | 运行模式=%s | 缓存命名空间=%s",
-            "正式版" if getattr(sys, "frozen", False) else "源码开发版",
-            MODEL_CACHE_DIR.name,
-        )
+        if getattr(sys, "frozen", False):
+            self.run_log.info(
+                "模型存储已初始化 | 运行模式=正式版 | 缓存命名空间=%s",
+                MODEL_CACHE_DIR.name,
+            )
+        else:
+            self.run_log.info(
+                "模型存储已初始化 | 运行模式=源码开发版 | 来源=共享模型仓库直读"
+            )
         threading.Thread(
             target=self._preload_local_model,
             args=(self.recognition_router,),

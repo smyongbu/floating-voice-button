@@ -80,6 +80,20 @@ class _EndpointRecognizer(_FakeRecognizer):
 
 
 class RealtimeAsrTests(unittest.TestCase):
+    def test_source_run_uses_shared_realtime_model_without_copying(self):
+        source = Path("O:/程序/共享模型仓库/streaming-paraformer")
+        cache = Path("C:/Users/test/AppData/Local/FloatingVoiceButton/models/streaming-paraformer")
+        spec = realtime_asr.REALTIME_MODEL_SPECS[DEFAULT_REALTIME_MODEL]
+        with (
+            patch.object(realtime_asr, "_running_frozen", return_value=False),
+            patch.object(realtime_asr, "_model_paths", return_value=(DEFAULT_REALTIME_MODEL, spec, source, cache)),
+            patch.object(realtime_asr, "_valid_model_file", return_value=True) as valid,
+            patch.object(realtime_asr.shutil, "copyfile") as copyfile,
+        ):
+            self.assertEqual(realtime_asr.install_realtime_model_locally(), source)
+        self.assertEqual(valid.call_count, len(spec["files"]))
+        copyfile.assert_not_called()
+
     def test_endpoint_silence_rules_can_be_shortened_for_control_words(self):
         recognizer = realtime_asr.RealtimeRecognizer(
             rule1_min_trailing_silence=1.2,
