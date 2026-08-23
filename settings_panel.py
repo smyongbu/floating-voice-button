@@ -85,6 +85,11 @@ def _serialize_entry(entry: HistoryEntry) -> dict:
         "id": entry.operation_id,
         "created_at": entry.created_at,
         "text": entry.text,
+        "status": entry.status,
+        "batch_id": entry.batch_id,
+        "preview_text": entry.preview_text,
+        "error_message": entry.error_message,
+        "queue_position": entry.queue_position,
     }
 
 
@@ -928,6 +933,8 @@ class WebSettingsApi:
             entry = self._store.get(str(operation_id))
             if entry is None:
                 return _failure("这条历史记录已经不存在。")
+            if entry.status != "completed" or not entry.text.strip():
+                return _failure("这条录音尚未识别完成，暂时不能复制。")
             hwnd = self._panel_hwnd()
             if not hwnd or not write_clipboard_text(entry.text, hwnd):
                 raise RuntimeError("系统剪贴板暂时不可用。")
@@ -949,6 +956,10 @@ class WebSettingsApi:
             if self._store is None:
                 return _failure("历史数据库暂时不可用。")
             entries, _signature = self._store.snapshot("")
+            entries = [
+                entry for entry in entries
+                if entry.status == "completed" and entry.text.strip()
+            ]
             if not entries:
                 return _failure("还没有可复制的历史文字。")
             text = "\r\n\r\n".join(entry.text for entry in entries)

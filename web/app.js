@@ -140,6 +140,7 @@ const state = {
 };
 
 const elements = {};
+const historyRevealLengths = new Map();
 let rootRule = null;
 let bridgeStarted = false;
 let recordingPreviewFrame = null;
@@ -155,7 +156,7 @@ function collectElements() {
     "standbyConfidence", "standbyConfidenceValue", "controlWordTestButton", "controlWordTestStatus",
     "resetButton", "saveButton",
     "navHistoryCount", "clearButton", "copyAllButton", "historySearch", "historyCount",
-    "refreshButton", "historyList", "historyEmpty", "historyDetail",
+    "refreshButton", "historyList", "historyEmpty", "historyDetail", "historyBatchStatus",
     "detailPlaceholder", "detailContent", "detailTime", "detailText",
     "deleteButton", "copyButton", "confirmModal", "modalTitle", "modalMessage",
     "modalCancel", "modalConfirm", "toast", "toastMessage", "bootScreen",
@@ -466,7 +467,7 @@ function syncModelControls(payload = state.model) {
     label?.classList.toggle("is-unavailable", input.disabled);
     label?.classList.toggle("is-downloadable", status?.downloadable === true && input.disabled);
     label?.style.setProperty("--download-progress", `${Math.max(0, Math.min(100, progress))}%`);
-    label?.querySelector(".model-card-download")?.remove();
+    label?.querySelector(".model-card-actions")?.remove();
     if (status?.downloadable === true && input.disabled && label) {
       const text = { queued: "准备中", downloading: "下载中", verifying: "校验中", pausing: "暂停中", paused: "继续", failed: "重试" }[resourceState] || "下载";
       const button = createTextElement("button", "model-card-download", text);
@@ -477,7 +478,21 @@ function syncModelControls(payload = state.model) {
         event.stopPropagation();
         manageLocalModelResource(input.value, ["queued", "downloading"].includes(resourceState) ? "pause" : "start");
       });
-      label.append(button);
+      const actions = document.createElement("span");
+      actions.className = "model-card-actions";
+      actions.append(button);
+      if (["queued", "downloading", "paused", "pausing"].includes(resourceState)) {
+        const cancelButton = createTextElement("button", "model-card-cancel", "取消下载");
+        cancelButton.type = "button";
+        cancelButton.disabled = state.modelBusy || resourceState === "pausing";
+        cancelButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          manageLocalModelResource(input.value, "delete");
+        });
+        actions.append(cancelButton);
+      }
+      label.append(actions);
     }
   }
   const realtimeInput = elements.realtimeModelOptions.querySelector(`input[value="${realtimeModel}"]`);
@@ -601,7 +616,21 @@ function renderEngineGroup(container, engines, inputName, stateKey) {
         const action = ["queued", "downloading"].includes(resourceState) ? "pause" : "start";
         manageLocalModelResource(engine.modelId, action);
       });
-      content.push(downloadButton);
+      const actions = document.createElement("span");
+      actions.className = "model-card-actions";
+      actions.append(downloadButton);
+      if (["queued", "downloading", "paused", "pausing"].includes(resourceState)) {
+        const cancelButton = createTextElement("button", "model-card-cancel", "取消下载");
+        cancelButton.type = "button";
+        cancelButton.disabled = state.modelBusy || resourceState === "pausing";
+        cancelButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          manageLocalModelResource(engine.modelId, "delete");
+        });
+        actions.append(cancelButton);
+      }
+      content.push(actions);
     }
     if (!isLocalGroup) content.push(createTextElement("em", "", engine.status));
     label.append(...content);
@@ -1135,13 +1164,19 @@ function renderDetail() {
   const hasEntry = Boolean(entry);
   elements.detailPlaceholder.hidden = hasEntry;
   elements.detailContent.hidden = !hasEntry;
+  const statusLabel = entry?.status === "recognizing"
+    ? "正在识别"
+    : (entry?.status === "queued" ? `排队第 ${entry.queue_position} 位` : "");
   elements.detailTime.textContent = hasEntry
-    ? formatDate(entry.created_at, true)
+    ? `${formatDate(entry.created_at, true)}${statusLabel ? ` · ${statusLabel}` : ""}`
     : "选择一条记录查看全文";
   if (!entry) {
     return;
   }
-  elements.detailText.textContent = entry.text;
+  elements.detailText.textContent = entry.status === "recognizing"
+    ? `${entry.partial_text || "正在识别…"}▍`
+    : (entry.status === "queued" ? "" : entry.text);
+  elements.copyButton.disabled = entry.status !== "completed";
 }
 
 function selectEntry(operationId) {
@@ -1165,18 +1200,31 @@ function renderHistory() {
     button.dataset.id = entry.id;
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", "false");
+    button.classList.toggle("is-pending", entry.status !== "completed");
 
     const text = document.createElement("p");
-    text.textContent = previewText(entry.text);
+    text.textContent = entry.status === "recognizing"
+      ? `${entry.partial_text || "正在识别…"}▍`
+      : previewText(entry.text);
+    const status = createTextElement(
+      "span", `history-status is-${entry.status}`,
+      entry.status === "recognizing"
+        ? "识别中"
+        : (entry.status === "queued" ? `排队 ${entry.queue_position}` : (entry.status === "failed" ? "失败" : "已完成")),
+    );
     const time = document.createElement("time");
     time.dateTime = entry.created_at;
     time.textContent = formatDate(entry.created_at, false);
-    button.append(text, time);
+    if (entry.status === "queued") button.append(status, time);
+    else button.append(text, status, time);
     button.addEventListener("click", () => selectEntry(entry.id));
     button.addEventListener("dblclick", () => copyEntry(entry.id));
     fragment.append(button);
   }
   elements.historyList.replaceChildren(fragment);
+  const activeCount = state.entries.filter((entry) => ["queued", "recognizing"].includes(entry.status)).length;
+  elements.historyBatchStatus.hidden = activeCount === 0;
+  elements.historyBatchStatus.textContent = activeCount ? `待处理 ${activeCount} 段` : "";
 
   const query = elements.historySearch.value.trim();
   const empty = state.entries.length === 0;
@@ -1213,7 +1261,21 @@ function normalizeHistoryPayload(payload) {
       id: entry.id,
       created_at: String(entry.created_at || ""),
       text: entry.text,
+      status: ["queued", "recognizing", "completed", "failed"].includes(entry.status) ? entry.status : "completed",
+      batch_id: String(entry.batch_id || ""),
+      preview_text: String(entry.preview_text || ""),
+      error_message: String(entry.error_message || ""),
+      queue_position: Math.max(0, Number(entry.queue_position || 0)),
+      partial_text: "",
     }));
+  for (const entry of state.entries) {
+    if (entry.status !== "recognizing") {
+      historyRevealLengths.delete(entry.id);
+      continue;
+    }
+    const length = Math.min(entry.preview_text.length, historyRevealLengths.get(entry.id) || 0);
+    entry.partial_text = entry.preview_text.slice(0, length);
+  }
   const signature = Array.isArray(payload?.signature) ? payload.signature : [state.entries.length, 0];
   state.signature = [Number(signature[0] || 0), Number(signature[1] || 0)];
   state.historyAvailable = payload?.available !== false;
@@ -1242,6 +1304,20 @@ async function loadHistory({ silent = false } = {}) {
       elements.refreshButton.classList.remove("is-spinning");
     }
   }
+}
+
+function advanceRecognizingHistoryText() {
+  let changed = false;
+  for (const entry of state.entries) {
+    if (entry.status !== "recognizing" || !entry.preview_text) continue;
+    const current = historyRevealLengths.get(entry.id) || 0;
+    if (current >= entry.preview_text.length) continue;
+    const next = current + 1;
+    historyRevealLengths.set(entry.id, next);
+    entry.partial_text = entry.preview_text.slice(0, next);
+    changed = true;
+  }
+  if (changed && currentView() === "history") renderHistory();
 }
 
 async function copyEntry(operationId = state.selectedId) {
@@ -1587,3 +1663,4 @@ window.addEventListener("pywebviewready", initializeBridge);
 if (typeof getLocalApi()?.get_initial_state === "function") {
   initializeBridge();
 }
+window.setInterval(advanceRecognizingHistoryText, 160);

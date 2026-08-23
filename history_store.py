@@ -17,6 +17,11 @@ class HistoryEntry:
     operation_id: str
     created_at: str
     text: str
+    status: str = "completed"
+    batch_id: str = ""
+    preview_text: str = ""
+    error_message: str = ""
+    queue_position: int = 0
 
 
 class HistoryRevisionMismatch(RuntimeError):
@@ -58,6 +63,22 @@ class HistoryStore:
                 )
                 """
             )
+            columns = {
+                str(row[1]) for row in connection.execute(
+                    "PRAGMA table_info(recognition_history)"
+                ).fetchall()
+            }
+            migrations = {
+                "status": "TEXT NOT NULL DEFAULT 'completed'",
+                "batch_id": "TEXT NOT NULL DEFAULT ''",
+                "preview_text": "TEXT NOT NULL DEFAULT ''",
+                "error_message": "TEXT NOT NULL DEFAULT ''",
+            }
+            for name, definition in migrations.items():
+                if name not in columns:
+                    connection.execute(
+                        f"ALTER TABLE recognition_history ADD COLUMN {name} {definition}"
+                    )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS history_meta (
@@ -104,6 +125,60 @@ class HistoryStore:
                 self._bump_revision(connection)
         return HistoryEntry(safe_operation_id, created_at, text)
 
+    def reserve(self, operation_id: str, batch_id: str) -> HistoryEntry:
+        safe_operation_id = str(operation_id).strip()
+        safe_batch_id = str(batch_id).strip()
+        if not safe_operation_id or not safe_batch_id:
+            raise ValueError("待处理历史记录缺少操作编号或批次编号。")
+        created_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO recognition_history"
+                "(operation_id, created_at, text, status, batch_id, preview_text, error_message) "
+                "VALUES (?, ?, '', 'queued', ?, '', '')",
+                (safe_operation_id, created_at, safe_batch_id),
+            )
+            if cursor.rowcount > 0:
+                self._bump_revision(connection)
+        return HistoryEntry(safe_operation_id, created_at, "", "queued", safe_batch_id)
+
+    def mark_recognizing(self, operation_id: str, preview_text: str = "") -> bool:
+        return self._update_pending(
+            operation_id, "recognizing", preview_text=str(preview_text or "")
+        )
+
+    def complete(self, operation_id: str, text: str) -> bool:
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("不能用空白文字完成历史记录。")
+        return self._update_pending(
+            operation_id, "completed", text=text, preview_text="", error_message=""
+        )
+
+    def fail(self, operation_id: str, message: str) -> bool:
+        return self._update_pending(
+            operation_id, "failed", preview_text="", error_message=str(message or "识别失败")
+        )
+
+    def _update_pending(self, operation_id: str, status: str, **values: str) -> bool:
+        allowed = {"text", "preview_text", "error_message"}
+        assignments = ["status = ?"]
+        parameters: list[object] = [status]
+        for name, value in values.items():
+            if name not in allowed:
+                continue
+            assignments.append(f"{name} = ?")
+            parameters.append(value)
+        parameters.append(str(operation_id))
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"UPDATE recognition_history SET {', '.join(assignments)} WHERE operation_id = ?",
+                tuple(parameters),
+            )
+            changed = cursor.rowcount > 0
+            if changed:
+                self._bump_revision(connection)
+            return changed
+
     @staticmethod
     def _search_parts(query: str) -> tuple[str, tuple[object, ...]]:
         search = str(query).strip()
@@ -111,8 +186,8 @@ class HistoryStore:
         where = ""
         if search:
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            where = "WHERE text LIKE ? ESCAPE '\\'"
-            parameters = (f"%{escaped}%",)
+            where = "WHERE text LIKE ? ESCAPE '\\' OR preview_text LIKE ? ESCAPE '\\'"
+            parameters = (f"%{escaped}%", f"%{escaped}%")
         return where, parameters
 
     def snapshot(self, query: str = "") -> tuple[list[HistoryEntry], tuple[int, int]]:
@@ -121,7 +196,8 @@ class HistoryStore:
         with self._connect() as connection:
             connection.execute("BEGIN")
             rows = connection.execute(
-                f"SELECT operation_id, created_at, text FROM recognition_history {where} "
+                f"SELECT operation_id, created_at, text, status, batch_id, preview_text, error_message "
+                f"FROM recognition_history {where} "
                 "ORDER BY created_at DESC, rowid DESC LIMIT ?",
                 (*parameters, self.limit),
             ).fetchall()
@@ -130,7 +206,23 @@ class HistoryStore:
                 "(SELECT COUNT(*) FROM recognition_history), "
                 "(SELECT value FROM history_meta WHERE key = 'revision')"
             ).fetchone()
-        entries = [HistoryEntry(str(row[0]), str(row[1]), str(row[2])) for row in rows]
+        queue_positions: dict[str, int] = {}
+        for row in reversed(rows):
+            if str(row[3]) == "queued":
+                batch_id = str(row[4])
+                queue_positions[batch_id] = queue_positions.get(batch_id, 0) + 1
+        seen_positions: dict[str, int] = {}
+        entries = []
+        for row in rows:
+            batch_id = str(row[4])
+            queue_position = 0
+            if str(row[3]) == "queued":
+                queue_position = queue_positions.get(batch_id, 0) - seen_positions.get(batch_id, 0)
+                seen_positions[batch_id] = seen_positions.get(batch_id, 0) + 1
+            entries.append(HistoryEntry(
+                str(row[0]), str(row[1]), str(row[2]), str(row[3]), batch_id,
+                str(row[5]), str(row[6]), queue_position,
+            ))
         signature = (
             int(signature_row[0]),
             int(signature_row[1]) if signature_row and signature_row[1] is not None else 0,
@@ -143,13 +235,17 @@ class HistoryStore:
     def get(self, operation_id: str) -> HistoryEntry | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT operation_id, created_at, text FROM recognition_history "
+                "SELECT operation_id, created_at, text, status, batch_id, preview_text, error_message "
+                "FROM recognition_history "
                 "WHERE operation_id = ?",
                 (str(operation_id),),
             ).fetchone()
         if row is None:
             return None
-        return HistoryEntry(str(row[0]), str(row[1]), str(row[2]))
+        return HistoryEntry(
+            str(row[0]), str(row[1]), str(row[2]), str(row[3]), str(row[4]),
+            str(row[5]), str(row[6]), 0,
+        )
 
     def delete(self, operation_id: str) -> bool:
         with self._connect() as connection:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import audioop
 import ctypes
 import subprocess
 import sys
@@ -8,6 +9,8 @@ import threading
 import time
 import uuid
 import winsound
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 from automation import (
@@ -58,6 +61,27 @@ ERROR_ALREADY_EXISTS = 183
 _INSTANCE_MUTEX = None
 
 
+@dataclass(slots=True)
+class RecognitionJob:
+    operation_id: str
+    batch_id: str
+    pcm: bytes
+    sample_rate: int
+    origin_hwnd: int
+    standby: bool
+    session: RealtimeSession | None
+    router: RecognitionRouter | None
+    created_at: float
+
+
+def has_effective_pcm16_audio(pcm: bytes) -> bool:
+    """快速跳过数字静音，避免无声音时仍长时间加载最终模型。"""
+    if len(pcm) < 2:
+        return False
+    usable = pcm[: len(pcm) - (len(pcm) % 2)]
+    return audioop.rms(usable, 2) >= 24 or audioop.max(usable, 2) >= 160
+
+
 def acquire_single_instance() -> bool:
     """确保同一 Windows 会话只存在一个悬浮按钮实例。"""
     global _INSTANCE_MUTEX
@@ -97,6 +121,12 @@ class VoiceButtonApp:
         self.pipeline_lock = threading.RLock()
         self.side_effect_lock = threading.RLock()
         self.stop_event = threading.Event()
+        self.recognition_condition = threading.Condition(self.lock)
+        self.recognition_jobs: deque[RecognitionJob] = deque()
+        self.active_batch_id = ""
+        self.batch_results: list[tuple[RecognitionJob, str]] = []
+        self.batch_errors: list[tuple[str, str]] = []
+        self.queued_router_counts: dict[int, int] = {}
         self.panel_process: subprocess.Popen | None = None
         self.audio_monitor = AudioLevelMonitor()
         self.recognition_router = RecognitionRouter(self.config)
@@ -158,6 +188,11 @@ class VoiceButtonApp:
             self._on_standby_error,
             confidence_threshold=int(self.config.get("standby_confidence", 80)),
         )
+        threading.Thread(
+            target=self._recognition_worker,
+            name="录音识别队列",
+            daemon=True,
+        ).start()
         self._config_stamp = self._read_config_stamp()
         threading.Thread(target=self._watch_config, name="配置监测", daemon=True).start()
         self.run_log.info("应用启动 | 版本=%s | 界面=逐像素Alpha分层窗口", APP_VERSION)
@@ -636,7 +671,10 @@ class VoiceButtonApp:
                     with self.lock:
                         previous_router = self.recognition_router
                         self.recognition_router = new_router
-                        previous_router_in_use = previous_router is self.active_router
+                        previous_router_in_use = (
+                            previous_router is self.active_router
+                            or self.queued_router_counts.get(id(previous_router), 0) > 0
+                        )
                     if not previous_router_in_use:
                         previous_router.close()
                     threading.Thread(
@@ -847,6 +885,90 @@ class VoiceButtonApp:
             self.transcript_window.update(update.text or "正在聆听…")
 
     def _finish(self) -> None:
+        """停止当前收音并立即入队；最终识别由单一后台工作线程顺序执行。"""
+        if not hasattr(self, "recognition_condition"):
+            self._finish_legacy()
+            return
+        op = self.operation_id
+        standby = bool(self.standby_operation)
+        session = None
+        router = None
+        try:
+            with self.pipeline_lock:
+                if self.closed:
+                    return
+                if bool(getattr(self.audio_monitor, "continuous", False)):
+                    pcm, sample_rate = self.audio_monitor.finish_capture()
+                else:
+                    pcm, sample_rate = self.audio_monitor.stop()
+                if standby:
+                    self.standby_listener.pause()
+            if standby and self.standby_stop_at_ms is not None:
+                original_bytes = len(pcm)
+                stop_byte = max(0, int(self.standby_stop_at_ms * sample_rate / 1000) * 2)
+                pcm = pcm[: min(original_bytes, stop_byte)]
+                self.run_log.info(
+                    "操作进度 | 编号=%s | 阶段=裁去结束控制词 | 正文毫秒=%d | 裁去字节=%d",
+                    op, self.standby_stop_at_ms, max(0, original_bytes - len(pcm)),
+                )
+            self._play_recording_cue("结束")
+            session = self.realtime_session
+            router = self.active_router or self.recognition_router
+            self.realtime_session = None
+            self.active_router = None
+            with self.recognition_condition:
+                if not self.active_batch_id:
+                    self.active_batch_id = uuid.uuid4().hex[:8]
+                    self.batch_results = []
+                    self.batch_errors = []
+                batch_id = self.active_batch_id
+                job = RecognitionJob(
+                    op, batch_id, pcm, sample_rate, self.origin_hwnd, standby,
+                    session, router, time.monotonic(),
+                )
+                self.recognition_jobs.append(job)
+                if router is not None:
+                    key = id(router)
+                    self.queued_router_counts[key] = self.queued_router_counts.get(key, 0) + 1
+                if self.history_store is not None:
+                    try:
+                        self.history_store.reserve(op, batch_id)
+                    except Exception as history_exc:
+                        self.error_log.error(
+                            "历史记录排队失败 | 编号=%s | 异常类型=%s",
+                            op, type(history_exc).__name__,
+                        )
+                self.recognition_condition.notify_all()
+                pending = len(self.recognition_jobs)
+            self.run_log.info(
+                "操作进度 | 编号=%s | 阶段=录音已进入识别队列 | 批次=%s | 待处理=%d",
+                op, batch_id, pending,
+            )
+        except Exception as exc:
+            if session is not None:
+                session.cancel()
+            self.error_log.error(
+                "操作失败 | 编号=%s | 阶段=停止录音并入队 | 异常类型=%s",
+                op, type(exc).__name__,
+            )
+            if not self.closed:
+                self._warning(str(exc))
+        finally:
+            transcript_window = getattr(self, "transcript_window", None)
+            if transcript_window is not None and not self.closed:
+                transcript_window.hide()
+            with self.recognition_condition:
+                self.recording = False
+                self.standby_operation = False
+                self.standby_end_cue_pending = False
+                self.standby_stop_at_ms = None
+                self.busy = False
+                self.recognition_condition.notify_all()
+            if not self.closed:
+                self.window.set_waveform([0.0] * 7)
+            self._restore_resting_pipeline()
+
+    def _finish_legacy(self) -> None:
         started = time.monotonic()
         op = self.operation_id
         live_result = None
@@ -1046,6 +1168,165 @@ class VoiceButtonApp:
                 self.window.set_waveform([0.0] * 7)
             self._restore_resting_pipeline()
 
+    def _recognition_worker(self) -> None:
+        while not self.stop_event.is_set():
+            with self.recognition_condition:
+                while not self.recognition_jobs and not self.stop_event.is_set():
+                    self.recognition_condition.wait(timeout=0.5)
+                if self.stop_event.is_set():
+                    return
+                job = self.recognition_jobs.popleft()
+            self._process_recognition_job(job)
+            self._finish_batch_when_idle(job.batch_id)
+
+    def _process_recognition_job(self, job: RecognitionJob) -> None:
+        started = time.monotonic()
+        live_result = None
+        try:
+            if self.history_store is not None:
+                self.history_store.mark_recognizing(job.operation_id)
+            audio_ms = int(len(job.pcm) / 2 / max(1, job.sample_rate) * 1000)
+            self.run_log.info(
+                "操作开始 | 编号=%s | 阶段=队列语音识别 | 批次=%s | 音频毫秒=%d",
+                job.operation_id, job.batch_id, audio_ms,
+            )
+            if len(job.pcm) < job.sample_rate // 2:
+                raise RuntimeError("录音时间太短，请重新录制。")
+            if not has_effective_pcm16_audio(job.pcm):
+                if job.session is not None:
+                    job.session.cancel()
+                if self.history_store is not None:
+                    self.history_store.delete(job.operation_id)
+                self.run_log.info(
+                    "操作完成 | 编号=%s | 阶段=数字静音快速结束 | 批次=%s | 耗时毫秒=%d",
+                    job.operation_id, job.batch_id,
+                    int((time.monotonic() - started) * 1000),
+                )
+                with self.recognition_condition:
+                    self.batch_errors.append((job.operation_id, "没有检测到有效声音"))
+                return
+            if job.session is not None:
+                try:
+                    live_result = job.session.finish(timeout=5.0)
+                    if self.history_store is not None and live_result.text:
+                        self.history_store.mark_recognizing(
+                            job.operation_id, live_result.text
+                        )
+                except Exception as realtime_exc:
+                    self.error_log.warning(
+                        "实时预览结束异常 | 编号=%s | 阶段=队列识别 | 异常类型=%s | 最终整段识别继续",
+                        job.operation_id, type(realtime_exc).__name__,
+                    )
+            if self.closed or self.stop_event.is_set():
+                return
+            if job.router is not None:
+                result = job.router.transcribe_pcm16(job.pcm, job.sample_rate)
+            else:
+                result = self._recognize_pcm(job.pcm, job.sample_rate)
+            text = result.text
+            if live_result is not None and live_result.text:
+                selected = choose_final_recognition(live_result.text, text)
+                text = selected.text
+                self.run_log.info(
+                    "操作进度 | 编号=%s | 阶段=实时与最终结果择优 | 来源=%s | 实时字符数=%d | 最终字符数=%d",
+                    job.operation_id, selected.source, len(live_result.text), len(result.text),
+                )
+            text = str(text or "").strip()
+            if not text:
+                raise RuntimeError("没有识别到有效语音，请重新录制。")
+            if self.history_store is not None:
+                self.history_store.complete(job.operation_id, text)
+            with self.recognition_condition:
+                self.batch_results.append((job, text))
+            self.run_log.info(
+                "操作完成 | 编号=%s | 阶段=队列语音识别 | 批次=%s | 字符数=%d | 耗时毫秒=%d",
+                job.operation_id, job.batch_id, len(text),
+                int((time.monotonic() - started) * 1000),
+            )
+        except Exception as exc:
+            message = exc.public_message if isinstance(exc, RecognitionError) else str(exc)
+            if self.history_store is not None:
+                try:
+                    self.history_store.fail(job.operation_id, message)
+                except Exception:
+                    pass
+            with self.recognition_condition:
+                self.batch_errors.append((job.operation_id, message))
+            self.error_log.error(
+                "操作失败 | 编号=%s | 阶段=队列语音识别 | 批次=%s | 异常类型=%s",
+                job.operation_id, job.batch_id, type(exc).__name__,
+            )
+        finally:
+            self._release_job_router(job.router)
+
+    def _release_job_router(self, router: RecognitionRouter | None) -> None:
+        if router is None:
+            return
+        close_router = False
+        with self.recognition_condition:
+            key = id(router)
+            remaining = max(0, self.queued_router_counts.get(key, 1) - 1)
+            if remaining:
+                self.queued_router_counts[key] = remaining
+            else:
+                self.queued_router_counts.pop(key, None)
+                close_router = router is not self.recognition_router and router is not self.active_router
+        if close_router:
+            router.close()
+
+    def _finish_batch_when_idle(self, batch_id: str) -> None:
+        while not self.stop_event.is_set():
+            with self.recognition_condition:
+                if self.recognition_jobs:
+                    return
+                if self.recording:
+                    self.recognition_condition.wait(timeout=0.25)
+                    continue
+                if batch_id != self.active_batch_id:
+                    return
+                results = list(self.batch_results)
+                errors = list(self.batch_errors)
+                self.batch_results = []
+                self.batch_errors = []
+                self.active_batch_id = ""
+                break
+        if self.closed or self.stop_event.is_set():
+            return
+        self._deliver_recognition_batch(batch_id, results, errors)
+
+    def _deliver_recognition_batch(
+        self,
+        batch_id: str,
+        results: list[tuple[RecognitionJob, str]],
+        errors: list[tuple[str, str]],
+    ) -> None:
+        manual_results = [(job, text) for job, text in results if not job.standby]
+        if not manual_results:
+            if errors:
+                self._warning("没有识别到有效语音，请重新录制。")
+            return
+        combined = "\n".join(text for _job, text in manual_results)
+        operation_id = manual_results[0][0].operation_id
+        origin_hwnd = manual_results[0][0].origin_hwnd
+        with self.side_effect_lock:
+            if self.closed or self.stop_event.is_set():
+                return
+            self._ensure_clipboard_text(combined, operation_id, "整批识别完成")
+            if bool(self.config.get("auto_paste_enabled", True)):
+                if not activate_window_and_wait(origin_hwnd):
+                    self._warning("无法切回原软件，整批文字已保留在剪贴板中。")
+                    return
+                time.sleep(max(0, int(self.config["paste_wait_ms"])) / 1000)
+                if not activate_window_and_wait(origin_hwnd) or foreground_window() != origin_hwnd:
+                    self._warning("粘贴前原软件失去焦点，整批文字已保留在剪贴板中。")
+                    return
+                self._ensure_clipboard_text(combined, operation_id, "整批粘贴前")
+                paste()
+        self.run_log.info(
+            "操作完成 | 编号=%s | 阶段=整批文字输出 | 批次=%s | 成功段数=%d | 失败段数=%d | 字符数=%d",
+            operation_id, batch_id, len(results), len(errors), len(combined),
+        )
+
     def _recognize_pcm(self, pcm: bytes, sample_rate: int) -> RecognitionResult:
         """统一识别入口；保留旧测试夹具和升级中的旧实例兼容。"""
         router = getattr(self, "active_router", None) or getattr(
@@ -1079,6 +1360,15 @@ class VoiceButtonApp:
             self.closed = True
             self.busy = True
         self.stop_event.set()
+        recognition_condition = getattr(self, "recognition_condition", None)
+        if recognition_condition is not None:
+            with recognition_condition:
+                queued_jobs = list(self.recognition_jobs)
+                self.recognition_jobs.clear()
+                recognition_condition.notify_all()
+            for job in queued_jobs:
+                if job.session is not None:
+                    job.session.cancel()
         # 等待已经开始的短暂历史/窗口/剪贴板副作用结束；此后 closed
         # 会阻止任何新的副作用进入。
         with self.side_effect_lock:

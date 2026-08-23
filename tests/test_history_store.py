@@ -93,6 +93,39 @@ class HistoryStoreTests(unittest.TestCase):
             self.assertEqual(count, 2)
             self.assertGreater(current_revision, stale_revision)
 
+    def test_pending_batch_tracks_queue_positions_and_completion(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = HistoryStore(Path(temp) / "history.db")
+            store.reserve("first", "batch-1")
+            store.reserve("second", "batch-1")
+
+            entries = {entry.operation_id: entry for entry in store.list_entries()}
+            self.assertEqual(entries["first"].queue_position, 1)
+            self.assertEqual(entries["second"].queue_position, 2)
+            self.assertEqual(entries["first"].status, "queued")
+
+            self.assertTrue(store.mark_recognizing("first", "正在出现"))
+            recognizing = store.get("first")
+            self.assertEqual(recognizing.status, "recognizing")
+            self.assertEqual(recognizing.preview_text, "正在出现")
+
+            self.assertTrue(store.complete("first", "识别完成"))
+            completed = store.get("first")
+            self.assertEqual(completed.status, "completed")
+            self.assertEqual(completed.text, "识别完成")
+            self.assertEqual(completed.preview_text, "")
+
+    def test_pending_preview_is_searchable_and_failure_is_recorded(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = HistoryStore(Path(temp) / "history.db")
+            store.reserve("pending", "batch-2")
+            store.mark_recognizing("pending", "逐字预览")
+            self.assertEqual(store.list_entries("预览")[0].operation_id, "pending")
+            self.assertTrue(store.fail("pending", "没有声音"))
+            failed = store.get("pending")
+            self.assertEqual(failed.status, "failed")
+            self.assertEqual(failed.error_message, "没有声音")
+
 
 if __name__ == "__main__":
     unittest.main()

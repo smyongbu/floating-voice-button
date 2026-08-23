@@ -1820,7 +1820,7 @@ kbd {
 .history-list-pane {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: transparent;
@@ -1828,8 +1828,23 @@ kbd {
 }
 
 .history-list-toolbar {
-  padding: 0 14px 12px 0;
+  display: flex;
+  min-height: 55px;
+  align-items: center;
+  padding: 0 14px 0 0;
   border-bottom: 1px solid var(--border);
+}
+
+.history-batch-status {
+  margin: 12px 14px 0 0;
+  padding: 8px 11px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  font-size: var(--font-size-small);
+  font-weight: 650;
+  line-height: 1.5;
 }
 
 .history-list-toolbar .search-box {
@@ -1839,6 +1854,13 @@ kbd {
 .history-list-body {
   position: relative;
   min-height: 0;
+  overflow: hidden;
+}
+
+.history-list-body > .empty-state {
+  position: absolute;
+  inset: 0;
+  height: auto;
 }
 
 .history-list {
@@ -1883,6 +1905,29 @@ kbd {
   line-height: 1.5;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.history-item.is-pending p {
+  margin-bottom: 7px;
+  color: var(--text-secondary);
+}
+
+.history-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  margin-right: 8px;
+  padding: 0 8px;
+  color: #475467;
+  background: #f2f4f7;
+  border-radius: 999px;
+  font-size: var(--font-size-small);
+  font-weight: 650;
+}
+
+.history-status.is-recognizing {
+  color: #1d4ed8;
+  background: #dbeafe;
 }
 
 .history-item time {
@@ -2780,13 +2825,22 @@ kbd {
   display: none;
 }
 
-#localModelView.local-mode-v3 .model-card-download {
+#localModelView.local-mode-v3 .model-card-actions {
   position: absolute;
   z-index: 2;
   top: 50%;
   right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+  transform: translateY(-50%);
+}
+
+#localModelView.local-mode-v3 .model-card-download,
+#localModelView.local-mode-v3 .model-card-cancel {
   min-width: 58px;
-  min-height: 30px;
+  min-height: 26px;
   padding: 0 10px;
   border: 1px solid #a9c5f8;
   border-radius: 6px;
@@ -2796,10 +2850,15 @@ kbd {
   font-size: var(--font-size-small);
   font-weight: 650;
   cursor: pointer;
-  transform: translateY(-50%);
 }
 
-#localModelView.local-mode-v3 .model-card-download:disabled {
+#localModelView.local-mode-v3 .model-card-cancel {
+  color: #667085;
+  border-color: #d0d5dd;
+}
+
+#localModelView.local-mode-v3 .model-card-download:disabled,
+#localModelView.local-mode-v3 .model-card-cancel:disabled {
   cursor: wait;
   opacity: .72;
 }

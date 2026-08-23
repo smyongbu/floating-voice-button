@@ -166,6 +166,19 @@ class WebSettingsApiTests(unittest.TestCase):
         self.assertFalse(response["ok"])
         write_clipboard.assert_not_called()
 
+    def test_copy_rejects_pending_history(self):
+        self.store.get.return_value = HistoryEntry(
+            operation_id="pending-op",
+            created_at="2026-08-24T05:30:00+08:00",
+            text="",
+            status="recognizing",
+            preview_text="正在出现",
+        )
+        with patch("settings_panel.write_clipboard_text") as write_clipboard:
+            response = self.api.copy_history("pending-op")
+        self.assertFalse(response["ok"])
+        write_clipboard.assert_not_called()
+
     def test_copy_all_joins_every_history_body_and_logs_only_metadata(self):
         entries = [
             HistoryEntry("new", "2026-08-18T10:00:00+08:00", "第一段文字"),

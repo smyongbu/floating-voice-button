@@ -1,4 +1,4 @@
 """语点 Windows 版的单一正式发布信息来源。"""
 
-APP_VERSION = "0.16.7"
+APP_VERSION = "0.16.8"
 MODEL_CACHE_NAMESPACE = "release-models-v1"
