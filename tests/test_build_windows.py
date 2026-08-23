@@ -14,6 +14,7 @@ class WindowsBuildTests(unittest.TestCase):
         icon_index = command.index("--icon")
         self.assertEqual(Path(command[icon_index + 1]).name, "app.ico")
         self.assertIn("settings_panel", command)
+        self.assertIn("clr", command)
         self.assertIn("--windowed", command)
 
     def test_lite_package_rejects_model_files(self):
@@ -47,6 +48,7 @@ class WindowsBuildTests(unittest.TestCase):
             build_windows.write_package_docs(package, "lite", [])
             instructions = (package / "使用说明.txt").read_text(encoding="utf-8")
             info = json.loads((package / "build-info.json").read_text(encoding="utf-8"))
+            self.assertIn("解压到本机磁盘", instructions)
             self.assertIn("第一次安装建议使用首次安装版", instructions)
             self.assertIn("轻量升级版", instructions)
             self.assertFalse(info["includesModels"])

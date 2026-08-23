@@ -162,6 +162,8 @@ def pyinstaller_command(python: Path) -> list[str]:
         f"{PROJECT_ROOT / 'assets'};assets",
         "--hidden-import",
         "settings_panel",
+        "--hidden-import",
+        "clr",
         "--collect-all",
         "webview",
         "--collect-all",
@@ -197,6 +199,8 @@ def write_package_docs(package_dir: Path, variant: str, copied_models: list[str]
         f"当前包：{'首次安装版（带基础模型）' if includes_models else '轻量升级版（不带模型）'}\n"
         "第一次安装建议使用首次安装版。以后升级可下载轻量升级版，"
         "并保留旧版 models 文件夹及 %LOCALAPPDATA%\\FloatingVoiceButton\\models。\n"
+        "请把压缩包完整解压到本机磁盘（例如 C: 或 D:）后运行，"
+        "不要直接从 ZIP 或 UNC 网络共享路径启动。\n"
         "运行入口：语点.exe\n"
         "应用、任务管理器和 Windows 通知区域使用同一语点图标。\n",
         encoding="utf-8",

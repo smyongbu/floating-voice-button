@@ -46,6 +46,7 @@ jobs:
             --add-data "web;web" `
             --add-data "assets;assets" `
             --hidden-import settings_panel `
+            --hidden-import clr `
             --collect-all webview `
             --collect-all sherpa_onnx `
             --collect-all faster_whisper `
