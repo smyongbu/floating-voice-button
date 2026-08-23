@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import threading
 import ctypes
@@ -10,10 +11,21 @@ from ctypes import wintypes
 from pathlib import Path
 
 from global_hotkey import normalize_hotkey
+from version import MODEL_CACHE_NAMESPACE
 
 
 APP_DATA_DIR = Path(os.getenv("LOCALAPPDATA", Path.home())) / "FloatingVoiceButton"
 CONFIG_PATH = APP_DATA_DIR / "config.json"
+
+
+def _default_model_cache_dir() -> Path:
+    """隔离源码开发缓存与正式 EXE 的跨版本模型缓存。"""
+    if getattr(sys, "frozen", False):
+        return APP_DATA_DIR / MODEL_CACHE_NAMESPACE
+    return APP_DATA_DIR / "models"
+
+
+MODEL_CACHE_DIR = _default_model_cache_dir()
 CONFIG_VERSION = 12
 DEFAULT_LOCAL_MODEL = "faster-whisper-small"
 LEGACY_LOCAL_MODELS = {

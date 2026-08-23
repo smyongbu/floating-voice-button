@@ -12,7 +12,7 @@ from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from config_store import APP_DATA_DIR
+from config_store import MODEL_CACHE_DIR
 from model_download import (
     ResourceVerificationError,
     ensure_resource_verified,
@@ -30,13 +30,15 @@ def _default_model_repository() -> Path:
     return PROJECT_DIR.parents[1] / "共享模型仓库"
 
 
-MODEL_SOURCE_ROOT = Path(
-    os.environ.get(
-        MODEL_REPOSITORY_ENV,
-        str(_default_model_repository()),
-    )
-).expanduser()
-LOCAL_MODELS_DIR = APP_DATA_DIR / "models"
+def _model_repository_root() -> Path:
+    default = _default_model_repository()
+    if getattr(sys, "frozen", False):
+        return default
+    return Path(os.environ.get(MODEL_REPOSITORY_ENV, str(default))).expanduser()
+
+
+MODEL_SOURCE_ROOT = _model_repository_root()
+LOCAL_MODELS_DIR = MODEL_CACHE_DIR
 
 SENSEVOICE_MODEL_ID = "sensevoice-small-int8"
 PARAFORMER_MODEL_ID = "paraformer-zh-small-int8"

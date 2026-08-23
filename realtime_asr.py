@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from config_store import (
-    APP_DATA_DIR,
     DEFAULT_REALTIME_MODEL,
+    MODEL_CACHE_DIR,
     ZIPFORMER_REALTIME_MODEL,
     normalize_realtime_model,
 )
@@ -32,12 +32,14 @@ def _default_model_repository() -> Path:
     return PROJECT_DIR.parents[1] / "共享模型仓库"
 
 
-MODEL_REPOSITORY_ROOT = Path(
-    os.environ.get(
-        MODEL_REPOSITORY_ENV,
-        str(_default_model_repository()),
-    )
-).expanduser()
+def _model_repository_root() -> Path:
+    default = _default_model_repository()
+    if getattr(sys, "frozen", False):
+        return default
+    return Path(os.environ.get(MODEL_REPOSITORY_ENV, str(default))).expanduser()
+
+
+MODEL_REPOSITORY_ROOT = _model_repository_root()
 REALTIME_MODEL_SPECS: dict[str, dict[str, Any]] = {
     DEFAULT_REALTIME_MODEL: {
         "name": "Streaming Paraformer",
@@ -100,7 +102,7 @@ REALTIME_MODEL_SPECS: dict[str, dict[str, Any]] = {
 # 保留旧常量名称，避免现有诊断和第三方来源测试失去固定清单入口。
 MODEL_DIRECTORY_NAME = str(REALTIME_MODEL_SPECS[ZIPFORMER_REALTIME_MODEL]["directory"])
 MODEL_SOURCE_DIR = MODEL_REPOSITORY_ROOT / MODEL_DIRECTORY_NAME
-MODEL_LOCAL_DIR = APP_DATA_DIR / "models" / ZIPFORMER_REALTIME_MODEL
+MODEL_LOCAL_DIR = MODEL_CACHE_DIR / ZIPFORMER_REALTIME_MODEL
 MODEL_FILES = REALTIME_MODEL_SPECS[ZIPFORMER_REALTIME_MODEL]["files"]
 MODEL_DOWNLOAD_URL = str(REALTIME_MODEL_SPECS[ZIPFORMER_REALTIME_MODEL]["download_url"])
 _END = object()
@@ -163,7 +165,7 @@ def _model_paths(model_id: str) -> tuple[str, dict[str, Any], Path, Path]:
     normalized = normalize_realtime_model(model_id)
     spec = REALTIME_MODEL_SPECS[normalized]
     source_dir = MODEL_REPOSITORY_ROOT / str(spec["directory"])
-    local_dir = APP_DATA_DIR / "models" / normalized
+    local_dir = MODEL_CACHE_DIR / normalized
     return normalized, spec, source_dir, local_dir
 
 

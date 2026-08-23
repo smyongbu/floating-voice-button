@@ -1,12 +1,6 @@
 name: Windows 编译
 
-on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 发布版本号
-        required: true
-        default: v0.16.0
+on: workflow_dispatch
 
 permissions:
   contents: write
@@ -37,91 +31,38 @@ jobs:
         shell: pwsh
         run: python -m unittest discover -s tests -v
 
-      - name: 生成 Windows 版本资源
+      - name: 编译轻量升级版
         shell: pwsh
-        run: python -c "from tools.build_windows import APP_VERSION, write_windows_version_file; write_windows_version_file(APP_VERSION)"
+        run: python tools/build_windows.py --variant lite
 
-      - name: 编译语点
+      - name: 定位交付文件
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed `
-            --name "语点" `
-            --icon "assets/app.ico" `
-            --version-file "build/windows-version-info.txt" `
-            --add-data "web;web" `
-            --add-data "assets;assets" `
-            --hidden-import settings_panel `
-            --hidden-import clr `
-            --collect-all webview `
-            --collect-all sherpa_onnx `
-            --collect-all faster_whisper `
-            --collect-all ctranslate2 `
-            --collect-all transcribe_cpp `
-            app.py
-
-      - name: 写入 UNC 网络共享兼容配置
-        shell: pwsh
-        run: python -c "from pathlib import Path; from tools.build_windows import write_windows_dotnet_config; write_windows_dotnet_config(Path('dist') / '语点')"
-
-      - name: 创建独立模型文件夹
-        shell: pwsh
-        run: |
-          $modelDir = Join-Path $PWD "dist\语点\models"
-          New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
-          @"
-          此文件夹用于单独存放语音识别模型，模型不会编译进语点.exe。
-          也可以设置 VOICE_INPUT_MODEL_REPOSITORY，让程序读取其他模型仓库。
-          "@ | Set-Content -Encoding UTF8 (Join-Path $modelDir "模型放置说明.txt")
-
-      - name: 删除未使用的内置 VAD 模型
-        shell: pwsh
-        run: |
-          $vadModel = "dist\语点\_internal\faster_whisper\assets\silero_vad_v6.onnx"
-          if (Test-Path -LiteralPath $vadModel) {
-            Remove-Item -LiteralPath $vadModel -Force
-          }
-
-      - name: 检查发布包不含模型
-        shell: pwsh
-        run: |
-          $modelExtensions = @(".onnx", ".ort", ".gguf", ".safetensors", ".pt", ".pth", ".ckpt")
-          $forbidden = Get-ChildItem -LiteralPath "dist\语点" -Recurse -File | Where-Object {
-            $modelExtensions -contains $_.Extension.ToLowerInvariant() -or
-            ($_.Extension -eq ".bin" -and $_.Name -match "^(encoder|decoder|joiner|model|tokens)\.bin$")
-          }
-          if ($forbidden) {
-            $forbidden.FullName
-            throw "发布包中发现模型文件，已停止发布。"
-          }
-
-      - name: 生成压缩包和校验值
-        shell: pwsh
-        run: |
-          $version = "${{ inputs.version }}"
-          $zipName = "Yudian-Windows-$version.zip"
-          Compress-Archive -Path "dist\语点" -DestinationPath $zipName -CompressionLevel Optimal
-          (Get-FileHash -Algorithm SHA256 $zipName).Hash.ToLowerInvariant() | Set-Content -Encoding ASCII "$zipName.sha256"
-          "RELEASE_ZIP=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $version = python -c "from tools.build_windows import APP_VERSION; print(APP_VERSION)"
+          $zipPath = Join-Path $PWD "发布版本\语点-Windows-$version-轻量升级版-不带模型.zip"
+          if (-not (Test-Path -LiteralPath $zipPath)) { throw "未找到编译产物：$zipPath" }
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_ZIP=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: 发布 GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $version = "${{ inputs.version }}"
           $notesFile = "release-notes.md"
           @"
-          ## 语点 $version
+          ## 语点 $env:RELEASE_VERSION
 
           - 支持 Streaming Paraformer 与 Zipformer 实时显示文字。
           - 支持 Faster-Whisper Small、Qwen3-ASR 0.6B INT8 与 Qwen3-ASR 1.7B Q5_K_M 整段识别。
           - 移除识别后通用文字校正，保留模型原始输出。
-          - 模型不进入 EXE 或 ZIP，统一放在程序旁的独立 models 文件夹。
+          - 轻量版不包含模型；正式版复用自己的跨版本模型缓存，不读取源码开发缓存。
+          - ZIP 内根文件夹和 EXE 文件版本均与源码版本一致。
           - 压缩包附带 SHA-256 校验文件。
           "@ | Set-Content -Encoding UTF8 $notesFile
-          gh release create $version `
+          gh release create $env:RELEASE_VERSION `
             $env:RELEASE_ZIP `
             "$env:RELEASE_ZIP.sha256" `
             --target $env:GITHUB_SHA `
-            --title "语点 $version" `
+            --title "语点 $env:RELEASE_VERSION" `
             --notes-file $notesFile

@@ -15,7 +15,16 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-APP_VERSION = "v0.16.2"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from version import (  # noqa: E402
+    APP_VERSION as SOURCE_APP_VERSION,
+    MODEL_CACHE_NAMESPACE,
+)
+
+
+APP_VERSION = f"v{SOURCE_APP_VERSION}"
 APP_FOLDER_NAME = "语点"
 MODEL_REPOSITORY_ENV = "VOICE_INPUT_MODEL_REPOSITORY"
 FIRST_INSTALL_MODEL_IDS = (
@@ -252,14 +261,15 @@ def write_package_docs(package_dir: Path, variant: str, copied_models: list[str]
     (model_dir / "模型放置说明.txt").write_text(
         "此文件夹用于存放语点的外置语音识别模型。\n"
         "首次安装版附带 Faster-Whisper Small 与 Streaming Paraformer。\n"
-        "轻量升级版不附带模型，会复用已有 models 文件夹或本机模型缓存。\n",
+        "轻量升级版不附带模型，会复用已有 models 文件夹或正式版模型缓存；不会读取源码开发缓存。\n",
         encoding="utf-8",
     )
     (package_dir / "使用说明.txt").write_text(
         "语点 Windows 编译版\n\n"
         f"当前包：{'首次安装版（带基础模型）' if includes_models else '轻量升级版（不带模型）'}\n"
         "第一次安装建议使用首次安装版。以后升级可下载轻量升级版，"
-        "并保留旧版 models 文件夹及 %LOCALAPPDATA%\\FloatingVoiceButton\\models。\n"
+        "并保留旧版 models 文件夹；正式版也会复用自己的跨版本模型缓存。\n"
+        f"正式版模型缓存位于 %LOCALAPPDATA%\\FloatingVoiceButton\\{MODEL_CACHE_NAMESPACE}。\n"
         "请完整解压后运行，可放在本机磁盘或 UNC 网络共享；"
         "不要直接从 ZIP 启动，也不要删除语点.exe.config。\n"
         "运行入口：语点.exe\n"
@@ -274,6 +284,8 @@ def write_package_docs(package_dir: Path, variant: str, copied_models: list[str]
         "includesModels": includes_models,
         "modelFiles": copied_models,
         "upgradeKeepsLocalModels": True,
+        "modelCacheNamespace": MODEL_CACHE_NAMESPACE,
+        "developmentCacheExcluded": True,
     }
     (package_dir / "build-info.json").write_text(
         json.dumps(build_info, ensure_ascii=False, indent=2) + "\n",
@@ -288,16 +300,18 @@ def archive_package(package_dir: Path, variant: str, version: str) -> tuple[Path
     archive = output_dir / f"语点-Windows-{version}-{label}.zip"
     if archive.exists():
         archive.unlink()
+    archive_root = Path(f"{APP_FOLDER_NAME}-Windows-{version}")
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
         for path in sorted(package_dir.rglob("*")):
             if path.is_file():
-                bundle.write(path, Path(package_dir.name) / path.relative_to(package_dir))
+                bundle.write(path, archive_root / path.relative_to(package_dir))
     checksum = archive.with_suffix(archive.suffix + ".sha256")
     checksum.write_text(f"{sha256_file(archive)}  {archive.name}\n", encoding="utf-8")
     return archive, checksum
 
 
-def build(variant: str, version: str, python: Path) -> tuple[Path, Path]:
+def build(variant: str, python: Path) -> tuple[Path, Path]:
+    version = APP_VERSION
     run_log, error_log = configure_logs()
     operation_id = uuid.uuid4().hex[:8]
     run_log.info("编译开始 | 编号=%s | 版本=%s | 类型=%s", operation_id, version, variant)
@@ -352,7 +366,6 @@ def parse_args() -> argparse.Namespace:
         default="lite",
         help="lite 为不带模型升级版；first-install 为首次安装版",
     )
-    parser.add_argument("--version", default=APP_VERSION)
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     return parser.parse_args()
 
@@ -361,7 +374,6 @@ if __name__ == "__main__":
     arguments = parse_args()
     built_archive, built_checksum = build(
         arguments.variant,
-        arguments.version,
         arguments.python,
     )
     print(built_archive)

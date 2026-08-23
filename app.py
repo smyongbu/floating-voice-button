@@ -24,6 +24,7 @@ from config_store import (
     APP_DATA_DIR,
     CONFIG_PATH,
     DEFAULT_CONFIG,
+    MODEL_CACHE_DIR,
     load_and_persist_config,
     load_config,
     update_config,
@@ -45,10 +46,10 @@ from test_mode_signal import (
     signal_test_mode_ready,
     test_mode_is_active,
 )
+from version import APP_VERSION
 
 
 APP_NAME = "悬浮语音按钮"
-APP_VERSION = "0.16.2"
 PANEL_TITLE = "语点 · 设置与历史记录"
 PROJECT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = PROJECT_DIR / "assets"
@@ -160,6 +161,11 @@ class VoiceButtonApp:
         self._config_stamp = self._read_config_stamp()
         threading.Thread(target=self._watch_config, name="配置监测", daemon=True).start()
         self.run_log.info("应用启动 | 版本=%s | 界面=逐像素Alpha分层窗口", APP_VERSION)
+        self.run_log.info(
+            "模型存储已初始化 | 运行模式=%s | 缓存命名空间=%s",
+            "正式版" if getattr(sys, "frozen", False) else "源码开发版",
+            MODEL_CACHE_DIR.name,
+        )
         threading.Thread(
             target=self._preload_local_model,
             args=(self.recognition_router,),

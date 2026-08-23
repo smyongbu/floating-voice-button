@@ -3,13 +3,36 @@ import json
 import tempfile
 import xml.etree.ElementTree as ET
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 from tools import build_windows
+from version import APP_VERSION as SOURCE_APP_VERSION, MODEL_CACHE_NAMESPACE
 
 
 class WindowsBuildTests(unittest.TestCase):
+    def test_build_version_comes_from_single_source(self):
+        self.assertEqual(build_windows.APP_VERSION, f"v{SOURCE_APP_VERSION}")
+        self.assertEqual(build_windows.MODEL_CACHE_NAMESPACE, MODEL_CACHE_NAMESPACE)
+
+    def test_build_cli_does_not_allow_version_override(self):
+        with patch("sys.argv", ["build_windows.py"]):
+            arguments = build_windows.parse_args()
+        self.assertFalse(hasattr(arguments, "version"))
+
+    def test_cloud_workflow_reuses_local_build_entrypoint(self):
+        workflow = (
+            build_windows.PROJECT_ROOT
+            / ".github"
+            / "workflows"
+            / "windows-release.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("python tools/build_windows.py --variant lite", workflow)
+        self.assertNotIn("inputs.version", workflow)
+        self.assertNotIn("pyinstaller --noconfirm", workflow)
+
+
     def test_pyinstaller_command_embeds_application_icon(self):
         command = build_windows.pyinstaller_command(Path("python.exe"))
         icon_index = command.index("--icon")
@@ -24,11 +47,11 @@ class WindowsBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with patch.object(build_windows, "PROJECT_ROOT", root):
-                version_file = build_windows.write_windows_version_file("v0.16.2")
+                version_file = build_windows.write_windows_version_file("v0.16.3")
             content = version_file.read_text(encoding="utf-8")
-            self.assertIn("filevers=(0, 16, 2, 0)", content)
-            self.assertIn("StringStruct('FileVersion', '0.16.2')", content)
-            self.assertIn("StringStruct('ProductVersion', '0.16.2')", content)
+            self.assertIn("filevers=(0, 16, 3, 0)", content)
+            self.assertIn("StringStruct('FileVersion', '0.16.3')", content)
+            self.assertIn("StringStruct('ProductVersion', '0.16.3')", content)
             self.assertIn("StringStruct('ProductName', '语点')", content)
 
     def test_windows_version_tuple_rejects_invalid_version(self):
@@ -79,8 +102,12 @@ class WindowsBuildTests(unittest.TestCase):
             self.assertIn("语点.exe.config", instructions)
             self.assertIn("第一次安装建议使用首次安装版", instructions)
             self.assertIn("轻量升级版", instructions)
+            self.assertIn(MODEL_CACHE_NAMESPACE, instructions)
             self.assertFalse(info["includesModels"])
+            self.assertEqual(info["appVersion"], SOURCE_APP_VERSION)
             self.assertTrue(info["upgradeKeepsLocalModels"])
+            self.assertEqual(info["modelCacheNamespace"], MODEL_CACHE_NAMESPACE)
+            self.assertTrue(info["developmentCacheExcluded"])
 
     def test_checksum_file_supports_chinese_archive_name(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -92,9 +119,14 @@ class WindowsBuildTests(unittest.TestCase):
                 archive, checksum = build_windows.archive_package(
                     package,
                     "lite",
-                    "v0.16.2",
+                    "v0.16.3",
                 )
             self.assertIn(archive.name, checksum.read_text(encoding="utf-8"))
+            with zipfile.ZipFile(archive) as bundle:
+                self.assertEqual(
+                    bundle.namelist(),
+                    ["语点-Windows-v0.16.3/使用说明.txt"],
+                )
 
     def test_manifest_files_are_size_and_hash_verified(self):
         payload = b"verified model"
