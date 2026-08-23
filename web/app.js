@@ -104,19 +104,6 @@ function getLocalApi() {
 
 const COLOR_PATTERN = /^#[0-9A-F]{6}$/;
 const DEFAULT_REALTIME_MODEL = "streaming-paraformer-bilingual-zh-en";
-const DEBUG_MODELS = [
-  ["streaming-paraformer-bilingual-zh-en", "Streaming Paraformer", "实时显示模型"],
-  ["zipformer-bilingual-zh-en-exp32-int8", "Zipformer", "实时显示模型"],
-  ["faster-whisper-small", "Faster-Whisper Small", "本地识别模型"],
-  ["qwen3-asr-0.6b-int8", "Qwen3-ASR 0.6B INT8", "本地识别模型"],
-  ["qwen3-asr-1.7b-q5km", "Qwen3-ASR 1.7B Q5_K_M", "本地识别模型"],
-];
-const debugState = {
-  active: false,
-  preset: "default",
-  statuses: Object.fromEntries(DEBUG_MODELS.map(([id], index) => [id, index === 0 || index === 2 ? "installed" : "missing"])),
-  progresses: Object.fromEntries(DEBUG_MODELS.map(([id]) => [id, 42])),
-};
 
 const state = {
   saved: { color: "#2563EB", opacity: 100, size: 72, hotkey: "Ctrl+Alt+Space", standby: false, transcript: true, autoPaste: true, confidence: 80 },
@@ -162,7 +149,7 @@ let recordingMotionQuery = null;
 
 function collectElements() {
   const ids = [
-    "appearanceView", "localModelView", "onlineModelView", "historyView", "debugView", "saveState", "colorPicker", "colorText",
+    "appearanceView", "localModelView", "onlineModelView", "historyView", "saveState", "colorPicker", "colorText",
     "colorError", "opacityRange", "opacityOutput", "sizeRange", "sizeOutput", "hotkeyInput", "hotkeyError",
     "hotkeyTestButton", "hotkeyStatus", "standbyToggle", "transcriptToggle", "autoPasteToggle",
     "standbyConfidence", "standbyConfidenceValue", "controlWordTestButton", "controlWordTestStatus",
@@ -177,7 +164,6 @@ function collectElements() {
     "localModelList", "deviceOptions", "fallbackModel",
     "providerList", "modelTestStatus", "localModelSaveButton", "onlineModelSaveButton",
     "localRecognitionSummary", "onlineRecognitionSummary", "recordingLayeredWave",
-    "debugPresets", "debugModelControls", "debugProgressRange", "debugProgressOutput", "debugOpenLocalButton",
   ];
   for (const id of ids) {
     elements[id] = document.getElementById(id);
@@ -305,7 +291,6 @@ function hideBootScreen() {
 }
 
 function currentView() {
-  if (!elements.debugView.hidden) return "debug";
   if (!elements.historyView.hidden) return "history";
   if (!elements.onlineModelView.hidden) return "onlineModel";
   if (!elements.localModelView.hidden) return "localModel";
@@ -404,8 +389,8 @@ function initializeRecordingPreviewMotion() {
 }
 
 function switchView(view, focusSearch = false) {
-  const next = ["appearance", "localModel", "onlineModel", "history", "debug"].includes(view) ? view : "appearance";
-  for (const name of ["appearance", "localModel", "onlineModel", "history", "debug"]) {
+  const next = ["appearance", "localModel", "onlineModel", "history"].includes(view) ? view : "appearance";
+  for (const name of ["appearance", "localModel", "onlineModel", "history"]) {
     const target = elements[`${name}View`];
     const active = name === next;
     target.hidden = !active;
@@ -419,7 +404,6 @@ function switchView(view, focusSearch = false) {
   const privacyCopy = {
     localModel: "本地模式不会上传录音",
     onlineModel: "在线识别会将录音上传至所选服务",
-    debug: "调试模式只改变界面模拟数据",
   };
   elements.sidebarPrivacyText.textContent = privacyCopy[next] || "设置与历史记录仅保存在本机";
   if (next === "history" && focusSearch) {
@@ -455,28 +439,6 @@ function formatSpeed(bytesPerSecond) {
   return `${formatBytes(value)}/秒`;
 }
 
-function debugResourceStatus(modelId, sizeBytes) {
-  const status = debugState.statuses[modelId] || "missing";
-  const state = { installed: "completed", missing: "not_started", downloading: "downloading", paused: "paused", verifying: "verifying", failed: "failed" }[status];
-  const percent = status === "installed" || status === "verifying" ? 100 : (["downloading", "paused"].includes(status) ? Number(debugState.progresses[modelId] || 0) : 0);
-  return { state, installed: status === "installed", verified: status === "installed", total_bytes: sizeBytes, downloaded_bytes: Math.round(sizeBytes * percent / 100), installed_bytes: status === "installed" ? sizeBytes : 0, percent };
-}
-
-function debugModelPayload() {
-  const payload = structuredClone(state.model);
-  for (const group of [payload.realtime_models || [], payload.local_models || []]) {
-    for (const model of group) {
-      const size = Number(model.size_bytes || 1);
-      const resource = debugResourceStatus(model.model_id, size);
-      model.available = resource.state === "completed";
-      model.downloadable = true;
-      model.resource_status = resource;
-      model.status = model.available ? "已安装" : "未安装";
-    }
-  }
-  return payload;
-}
-
 function syncModelControls(payload = state.model) {
   const localDraft = state.localEngineId;
   const onlineDraft = state.onlineEngineId;
@@ -498,19 +460,7 @@ function syncModelControls(payload = state.model) {
   for (const input of elements.realtimeModelOptions.querySelectorAll('input[name="realtimeModel"]')) {
     const status = realtimeStatuses.get(input.value);
     input.disabled = status ? status.available !== true : false;
-    const label = input.closest("label");
-    const resourceState = String(status?.resource_status?.state || "not_started");
-    label?.classList.toggle("is-unavailable", input.disabled);
-    label?.classList.toggle("is-downloadable", debugState.active && input.disabled);
-    label?.style.setProperty("--download-progress", `${Math.max(0, Math.min(100, Number(status?.resource_status?.percent || 0)))}%`);
-    label?.querySelector(".model-card-download")?.remove();
-    if (debugState.active && input.disabled && label) {
-      const button = createTextElement("button", "model-card-download", { downloading: "下载中", paused: "继续", verifying: "校验中", failed: "重试" }[resourceState] || "下载");
-      button.type = "button";
-      button.disabled = resourceState === "verifying";
-      button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); debugState.statuses[input.value] = resourceState === "downloading" ? "paused" : "downloading"; refreshDebugPreview(); });
-      label.append(button);
-    }
+    input.closest("label")?.classList.toggle("is-unavailable", input.disabled);
   }
   const realtimeInput = elements.realtimeModelOptions.querySelector(`input[value="${realtimeModel}"]`);
   if (realtimeInput && !realtimeInput.disabled) realtimeInput.checked = true;
@@ -555,7 +505,7 @@ function renderEngineOptions() {
       status: model.status || (model.available ? "已安装" : "不可用"),
       modelId: model.model_id,
       available: model.available === true,
-      downloadable: debugState.active || model.downloadable === true,
+      downloadable: model.downloadable === true,
       resourceStatus: model.resource_status || null,
       disabled: !model.available || (
         state.model.voice_test_active === true
@@ -711,18 +661,6 @@ function renderLocalModels() {
 
 function scheduleModelResourcePoll() {
   window.clearTimeout(state.modelResourceTimer);
-  if (debugState.active) {
-    const downloading = DEBUG_MODELS.filter(([id]) => debugState.statuses[id] === "downloading");
-    if (!downloading.length || document.hidden) return;
-    state.modelResourceTimer = window.setTimeout(() => {
-      for (const [id] of downloading) {
-        debugState.progresses[id] = Math.min(100, Number(debugState.progresses[id] || 0) + 8);
-        if (debugState.progresses[id] >= 100) debugState.statuses[id] = "installed";
-      }
-      refreshDebugPreview();
-    }, 500);
-    return;
-  }
   const models = state.model.local_models || [];
   const active = models.some((model) => {
     const resourceState = String(model.resource_status?.state || "");
@@ -753,13 +691,6 @@ function scheduleModelResourcePoll() {
 
 async function manageLocalModelResource(modelId, action) {
   if (state.modelBusy) return;
-  if (debugState.active) {
-    if (action === "pause") debugState.statuses[modelId] = "paused";
-    if (action === "start") debugState.statuses[modelId] = "downloading";
-    if (action === "delete") { debugState.statuses[modelId] = "missing"; debugState.progresses[modelId] = 0; }
-    refreshDebugPreview();
-    return;
-  }
   state.modelBusy = true;
   try {
     const response = await callApi("manage_local_model_resource", modelId, action);
@@ -1444,53 +1375,10 @@ async function pollHistorySignature() {
   }
 }
 
-const DEBUG_STATUS_OPTIONS = [["installed", "已安装"], ["missing", "未安装"], ["downloading", "下载中"], ["paused", "已暂停"], ["verifying", "校验中"], ["failed", "下载失败"]];
-
-function renderDebugControls() {
-  elements.debugModelControls.replaceChildren();
-  for (const [id, name, group] of DEBUG_MODELS) {
-    const row = document.createElement("label");
-    row.className = "debug-model-row";
-    const copy = document.createElement("span");
-    copy.className = "debug-model-copy";
-    copy.append(createTextElement("b", "", name), createTextElement("span", "", group));
-    const select = document.createElement("select");
-    select.dataset.debugModel = id;
-    for (const [value, label] of DEBUG_STATUS_OPTIONS) { const option = new Option(label, value); select.append(option); }
-    select.value = debugState.statuses[id];
-    row.append(copy, select);
-    elements.debugModelControls.append(row);
-  }
-  for (const button of elements.debugPresets.querySelectorAll("[data-debug-preset]")) button.classList.toggle("is-selected", button.dataset.debugPreset === debugState.preset);
-  const active = DEBUG_MODELS.find(([id]) => ["downloading", "paused", "verifying"].includes(debugState.statuses[id]));
-  const progress = active ? Number(debugState.progresses[active[0]] || 0) : 42;
-  elements.debugProgressRange.value = String(progress);
-  elements.debugProgressOutput.textContent = `${progress}%`;
-}
-
-function refreshDebugPreview() {
-  debugState.active = true;
-  syncModelControls(debugModelPayload());
-  renderDebugControls();
-}
-
-function applyDebugPreset(name) {
-  const presets = { default: ["installed", "missing", "installed", "missing", "missing"], empty: ["missing", "missing", "missing", "missing", "missing"], downloading: ["downloading", "downloading", "installed", "missing", "missing"], complete: ["installed", "installed", "installed", "installed", "installed"], failed: ["installed", "failed", "installed", "missing", "failed"] };
-  const values = presets[name] || presets.default;
-  DEBUG_MODELS.forEach(([id], index) => { debugState.statuses[id] = values[index]; if (values[index] === "downloading") debugState.progresses[id] = 42; });
-  debugState.preset = presets[name] ? name : "default";
-  refreshDebugPreview();
-}
-
 function bindEvents() {
   for (const button of elements.navItems) {
     button.addEventListener("click", () => switchView(button.dataset.view));
   }
-
-  elements.debugPresets.addEventListener("click", (event) => { const button = event.target.closest("[data-debug-preset]"); if (button) applyDebugPreset(button.dataset.debugPreset); });
-  elements.debugModelControls.addEventListener("change", (event) => { const select = event.target.closest("select[data-debug-model]"); if (!select) return; debugState.statuses[select.dataset.debugModel] = select.value; debugState.preset = "custom"; refreshDebugPreview(); });
-  elements.debugProgressRange.addEventListener("input", (event) => { const progress = Math.max(0, Math.min(100, Number(event.target.value) || 0)); const active = DEBUG_MODELS.filter(([id]) => ["downloading", "paused", "verifying"].includes(debugState.statuses[id])); for (const [id] of active) debugState.progresses[id] = progress; elements.debugProgressOutput.textContent = `${progress}%`; refreshDebugPreview(); });
-  elements.debugOpenLocalButton.addEventListener("click", () => switchView("localModel"));
 
   elements.colorPicker.addEventListener("input", (event) => setDraftColor(event.target.value));
   elements.colorText.addEventListener("input", (event) => setDraftColor(event.target.value));
@@ -1673,7 +1561,6 @@ async function initializeBridge() {
 
 collectElements();
 rootRule = findRootRule();
-renderDebugControls();
 bindEvents();
 syncAppearanceControls();
 renderHistory();

@@ -34,30 +34,6 @@
   box-sizing: border-box;
 }
 
-.debug-view { max-width: 920px; }
-.debug-badge { display: inline-flex; align-items: center; min-height: 28px; padding: 0 11px; border: 1px solid #bfdbfe; border-radius: 999px; color: #1d4ed8; background: #eff6ff; font-size: var(--font-size-small); font-weight: 700; }
-.debug-layout { display: grid; gap: 16px; }
-.debug-card { padding: 22px; }
-.debug-presets { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
-.debug-presets .button.is-selected { border-color: #2563eb; color: #1d4ed8; background: #eff6ff; box-shadow: 0 0 0 1px #2563eb inset; }
-.debug-model-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin-top: 18px; }
-.debug-model-row { display: grid; grid-template-columns: minmax(0, 1fr) 132px; align-items: center; gap: 12px; min-height: 70px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
-.debug-model-copy b, .debug-model-copy span { display: block; }
-.debug-model-copy b { overflow: hidden; font-size: var(--font-size-body); text-overflow: ellipsis; white-space: nowrap; }
-.debug-model-copy span { margin-top: 4px; color: var(--text-secondary); font-size: var(--font-size-small); }
-.debug-model-row select { width: 100%; min-height: 36px; padding: 0 30px 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--surface); font: inherit; font-size: var(--font-size-small); }
-.debug-progress-card { display: grid; gap: 16px; }
-.debug-progress-heading, .debug-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.debug-progress-heading h2 { margin: 0; font-size: var(--font-size-heading); }
-.debug-progress-heading p, .debug-footer p { margin: 5px 0 0; color: var(--text-secondary); font-size: var(--font-size-small); }
-.debug-progress-heading output { min-width: 54px; padding: 5px 9px; border-radius: 8px; color: #1d4ed8; background: #eff6ff; font-weight: 700; text-align: center; }
-.debug-progress-card input[type="range"] { width: 100%; }
-
-@media (max-width: 760px) {
-  .debug-model-list { grid-template-columns: 1fr; }
-  .debug-footer { align-items: stretch; flex-direction: column; }
-}
-
 [hidden] {
   display: none !important;
 }
