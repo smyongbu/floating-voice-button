@@ -48,7 +48,7 @@ from test_mode_signal import (
 
 
 APP_NAME = "悬浮语音按钮"
-APP_VERSION = "0.16.1"
+APP_VERSION = "0.16.2"
 PANEL_TITLE = "语点 · 设置与历史记录"
 PROJECT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = PROJECT_DIR / "assets"

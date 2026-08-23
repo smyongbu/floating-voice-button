@@ -59,6 +59,10 @@ jobs:
             --collect-all transcribe_cpp `
             app.py
 
+      - name: 写入 UNC 网络共享兼容配置
+        shell: pwsh
+        run: python -c "from pathlib import Path; from tools.build_windows import write_windows_dotnet_config; write_windows_dotnet_config(Path('dist') / '语点')"
+
       - name: 创建独立模型文件夹
         shell: pwsh
         run: |

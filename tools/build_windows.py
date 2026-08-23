@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-APP_VERSION = "v0.16.1"
+APP_VERSION = "v0.16.2"
 APP_FOLDER_NAME = "语点"
 MODEL_REPOSITORY_ENV = "VOICE_INPUT_MODEL_REPOSITORY"
 FIRST_INSTALL_MODEL_IDS = (
@@ -112,6 +112,21 @@ def write_windows_version_file(version: str) -> Path:
 """
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def write_windows_dotnet_config(package_dir: Path) -> Path:
+    path = package_dir / f"{APP_FOLDER_NAME}.exe.config"
+    path.write_text(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        "<configuration>\n"
+        "  <runtime>\n"
+        "    <loadFromRemoteSources enabled=\"true\" />\n"
+        "  </runtime>\n"
+        "</configuration>\n",
+        encoding="utf-8",
+    )
+    return path
+
 
 def default_model_repository() -> Path:
     configured = os.environ.get(MODEL_REPOSITORY_ENV)
@@ -245,8 +260,8 @@ def write_package_docs(package_dir: Path, variant: str, copied_models: list[str]
         f"当前包：{'首次安装版（带基础模型）' if includes_models else '轻量升级版（不带模型）'}\n"
         "第一次安装建议使用首次安装版。以后升级可下载轻量升级版，"
         "并保留旧版 models 文件夹及 %LOCALAPPDATA%\\FloatingVoiceButton\\models。\n"
-        "请把压缩包完整解压到本机磁盘（例如 C: 或 D:）后运行，"
-        "不要直接从 ZIP 或 UNC 网络共享路径启动。\n"
+        "请完整解压后运行，可放在本机磁盘或 UNC 网络共享；"
+        "不要直接从 ZIP 启动，也不要删除语点.exe.config。\n"
         "运行入口：语点.exe\n"
         "应用、任务管理器和 Windows 通知区域使用同一语点图标。\n",
         encoding="utf-8",
@@ -295,6 +310,7 @@ def build(variant: str, version: str, python: Path) -> tuple[Path, Path]:
         write_windows_version_file(version)
         subprocess.run(pyinstaller_command(python), cwd=PROJECT_ROOT, check=True)
         package_dir = PROJECT_ROOT / "dist" / APP_FOLDER_NAME
+        write_windows_dotnet_config(package_dir)
         vad_model = package_dir / "_internal" / "faster_whisper" / "assets" / "silero_vad_v6.onnx"
         if vad_model.exists():
             vad_model.unlink()

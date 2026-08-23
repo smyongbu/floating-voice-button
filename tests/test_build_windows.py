@@ -1,6 +1,7 @@
 import hashlib
 import json
 import tempfile
+import xml.etree.ElementTree as ET
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,16 +24,27 @@ class WindowsBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with patch.object(build_windows, "PROJECT_ROOT", root):
-                version_file = build_windows.write_windows_version_file("v0.16.1")
+                version_file = build_windows.write_windows_version_file("v0.16.2")
             content = version_file.read_text(encoding="utf-8")
-            self.assertIn("filevers=(0, 16, 1, 0)", content)
-            self.assertIn("StringStruct('FileVersion', '0.16.1')", content)
-            self.assertIn("StringStruct('ProductVersion', '0.16.1')", content)
+            self.assertIn("filevers=(0, 16, 2, 0)", content)
+            self.assertIn("StringStruct('FileVersion', '0.16.2')", content)
+            self.assertIn("StringStruct('ProductVersion', '0.16.2')", content)
             self.assertIn("StringStruct('ProductName', '语点')", content)
 
     def test_windows_version_tuple_rejects_invalid_version(self):
         with self.assertRaises(ValueError):
             build_windows.windows_version_tuple("v0.16")
+
+    def test_windows_dotnet_config_allows_managed_dependencies_from_unc(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory)
+            config = build_windows.write_windows_dotnet_config(package)
+            root = ET.parse(config).getroot()
+            setting = root.find("./runtime/loadFromRemoteSources")
+            self.assertIsNotNone(setting)
+            self.assertEqual(setting.attrib["enabled"], "true")
+            self.assertEqual(config.name, "语点.exe.config")
+
     def test_lite_package_rejects_model_files(self):
         with tempfile.TemporaryDirectory() as directory:
             package = Path(directory)
@@ -64,7 +76,7 @@ class WindowsBuildTests(unittest.TestCase):
             build_windows.write_package_docs(package, "lite", [])
             instructions = (package / "使用说明.txt").read_text(encoding="utf-8")
             info = json.loads((package / "build-info.json").read_text(encoding="utf-8"))
-            self.assertIn("解压到本机磁盘", instructions)
+            self.assertIn("语点.exe.config", instructions)
             self.assertIn("第一次安装建议使用首次安装版", instructions)
             self.assertIn("轻量升级版", instructions)
             self.assertFalse(info["includesModels"])
@@ -80,7 +92,7 @@ class WindowsBuildTests(unittest.TestCase):
                 archive, checksum = build_windows.archive_package(
                     package,
                     "lite",
-                    "v0.16.1",
+                    "v0.16.2",
                 )
             self.assertIn(archive.name, checksum.read_text(encoding="utf-8"))
 

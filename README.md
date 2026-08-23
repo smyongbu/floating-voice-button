@@ -17,7 +17,7 @@
 
 一个可选择本地模型或国内在线服务的 Windows 悬浮语音输入按钮。设置与历史记录使用本地 HTML、CSS、JavaScript 和系统 WebView2；悬浮层使用 Windows 逐像素 Alpha 分层窗口。默认使用本地识别，不会上传录音。项目内另有 `android-app` 安卓悬浮版源码与安装包。
 
-当前 Windows 源码版本为 `0.16.1`。
+当前 Windows 源码版本为 `0.16.2`。
 
 ## 共用悬浮按钮调试页
 
@@ -76,7 +76,7 @@
 - Microsoft Edge WebView2 Runtime（Windows 11 通常已自带；缺少时需先安装）
 - Windows 所有现用模型统一以 `O:\程序\共享模型仓库` 为规范源；源码通过相对于共同上级目录的路径定位，也可用 `VOICE_INPUT_MODEL_REPOSITORY` 覆盖。运行时如需复制到 `%LOCALAPPDATA%\FloatingVoiceButton\models`，该副本仅是可重建缓存。删除应用缓存不会删除共享仓库，重新使用时直接从共享仓库恢复，不重复联网下载
 - 不带模型轻量升级版不会把模型编译进 EXE 或 ZIP。解压后，程序从 `语点.exe` 旁边独立的 `models` 文件夹读取外置模型；也可继续通过 `VOICE_INPUT_MODEL_REPOSITORY` 指定其他模型仓库。
-- 编译版必须先完整解压到本机磁盘（例如 `C:\\语点` 或 `D:\\语点`）再运行；不要直接从 ZIP、NAS 或 `\\\\服务器\\共享` 这类 UNC 网络路径启动，否则 .NET WebView 后端可能无法加载，导致“设置与历史记录”打不开。
+- 编译版必须先完整解压再运行，既可放在本机磁盘，也可从 NAS 或 `\\服务器\共享` 这类 UNC 网络路径启动。网络共享兼容依赖 `语点.exe` 同目录的 `语点.exe.config`，升级、复制或整理文件时不要删除；仍不能直接从 ZIP 内运行。
 - Windows 编译版分为两种：第一次安装优先下载“首次安装版”，它在 `models` 文件夹附带 Faster-Whisper Small 与 Streaming Paraformer；以后升级可只下载“不带模型轻量升级版”，直接复用电脑上已经安装的模型，不重复下载模型文件。
 - 轻量升级不会删除 `%LOCALAPPDATA%\FloatingVoiceButton\models` 中的模型缓存。若模型放在旧版 `语点.exe` 旁边的 `models` 文件夹，升级时应保留该文件夹，或把它与新版程序放在同一目录。
 - `语点.exe`、任务管理器中的语点进程及 Windows 通知区域统一使用 `assets\app.ico` 应用图标。通知区域图标左键打开设置，右键打开与悬浮按钮相同的菜单。
