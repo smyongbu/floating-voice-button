@@ -1,6 +1,6 @@
 # 安卓语音输入
 
-面向红米 K70 的本地中英双语语音识别 App，当前版本为 `0.12.1`。主界面统一使用本地 HTML、CSS 和 JavaScript，Kotlin 只负责 WebView 宿主、麦克风、识别模型、权限、历史数据库、下载器、通知和系统级悬浮窗等平台能力。Streaming Paraformer、Zipformer 与 Qwen3-ASR 0.6B INT8 使用 `sherpa-onnx 1.13.5`；Faster-Whisper Small 与 Qwen3-ASR 1.7B Q5_K_M 使用固定提交的 `transcribe.cpp` Android JNI 运行层。
+面向红米 K70 的本地中英双语语音识别 App，当前版本为 `0.12.2`。主界面统一使用本地 HTML、CSS 和 JavaScript，Kotlin 只负责 WebView 宿主、麦克风、识别模型、权限、历史数据库、下载器、通知和系统级悬浮窗等平台能力。Streaming Paraformer、Zipformer 与 Qwen3-ASR 0.6B INT8 使用 `sherpa-onnx 1.13.5`；Faster-Whisper Small 与 Qwen3-ASR 1.7B Q5_K_M 使用固定提交的 `transcribe.cpp` Android JNI 运行层。
 
 ## 主要功能
 

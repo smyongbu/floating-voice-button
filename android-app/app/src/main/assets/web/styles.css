@@ -436,6 +436,20 @@ button:disabled {
 
 .compact-heading .transcript-section-title { color: var(--color-primary-strong); }
 
+.transcript-heading-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.final-recognition-status {
+  color: var(--color-text-tertiary);
+  font-size: 0.78rem;
+  font-weight: 540;
+  white-space: nowrap;
+}
+
 .icon-text-button {
   display: inline-flex;
   min-width: 64px;

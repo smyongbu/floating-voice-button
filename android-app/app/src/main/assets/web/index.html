@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>悬浮语音按钮</title>
-  <link rel="stylesheet" href="styles.css?v=20260823-03">
+  <link rel="stylesheet" href="styles.css?v=20260824-01">
 </head>
 <body>
   <a class="skip-link" href="#mainContent">跳到主要内容</a>
@@ -44,8 +44,9 @@
 
         <section class="transcript-card" aria-labelledby="transcriptTitle">
           <div class="section-heading compact-heading">
-            <div>
+            <div class="transcript-heading-copy">
               <h2 id="transcriptTitle" class="transcript-section-title">识别结果</h2>
+              <span id="finalRecognitionStatus" class="final-recognition-status is-hidden" role="status">最后识别中···</span>
             </div>
             <button id="copyTranscriptButton" class="icon-text-button" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -233,7 +234,6 @@
           <div class="setting-row setting-row-compact">
             <div class="setting-copy">
               <h3>显示识别文字框</h3>
-              <p>关闭后隐藏文字框，识别结果仍会保存。</p>
             </div>
             <label class="switch-control">
               <span class="visually-hidden">显示悬浮识别文字框</span>
@@ -325,6 +325,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script src="app.js?v=20260823-03" defer></script>
+  <script src="app.js?v=20260824-01" defer></script>
 </body>
 </html>

@@ -40,6 +40,7 @@
     recordButtonText: document.getElementById("recordButtonText"),
     cancelButton: document.getElementById("cancelButton"),
     transcriptText: document.getElementById("transcriptText"),
+    finalRecognitionStatus: document.getElementById("finalRecognitionStatus"),
     recognitionAnnouncement: document.getElementById("recognitionAnnouncement"),
     copyTranscriptButton: document.getElementById("copyTranscriptButton"),
     resourceNotice: document.getElementById("resourceNotice"),
@@ -600,6 +601,7 @@
     elements.cancelButton.classList.toggle("is-hidden", !active);
     elements.transcriptText.textContent = text || "识别文字会显示在这里";
     elements.transcriptText.classList.toggle("is-placeholder", !text);
+    elements.finalRecognitionStatus.classList.toggle("is-hidden", phase !== "processing");
     if (previousRecognitionActive && !active) {
       elements.recognitionAnnouncement.textContent = text ? "识别完成，文字已保存。" : "本次识别已结束。";
     }
@@ -639,7 +641,7 @@
     const filtered = state.history.filter((item) => String(item.text || "").toLocaleLowerCase("zh-CN").includes(query));
     const ordered = [...filtered].sort((left, right) => historyTimestamp(left) - historyTimestamp(right));
     const visible = ordered.slice(Math.max(0, ordered.length - state.historyVisibleCount));
-    elements.historyCount.textContent = state.history.length ? `${state.history.length} 条记录` : "还没有记录";
+    elements.historyCount.textContent = `${state.history.length} 条记录 · 最多保存 500 条`;
     elements.historyEmptyTitle.textContent = "识别完成后会出现在这里";
     elements.historyEmptyText.textContent = "最多保存 500 条；本地识别不上传录音，系统识别取决于手机语音服务。";
     elements.clearHistoryButton.disabled = state.history.length === 0;
