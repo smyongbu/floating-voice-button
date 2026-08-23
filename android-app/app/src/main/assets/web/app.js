@@ -43,9 +43,12 @@
     recognitionAnnouncement: document.getElementById("recognitionAnnouncement"),
     copyTranscriptButton: document.getElementById("copyTranscriptButton"),
     resourceNotice: document.getElementById("resourceNotice"),
-    activeModelsButton: document.getElementById("activeModelsButton"),
-    activeModelsTitle: document.getElementById("activeModelsTitle"),
-    activeModelsDetail: document.getElementById("activeModelsDetail"),
+    realtimeModelButton: document.getElementById("realtimeModelButton"),
+    realtimeModelName: document.getElementById("realtimeModelName"),
+    realtimeModelProgress: document.getElementById("realtimeModelProgress"),
+    finalModelButton: document.getElementById("finalModelButton"),
+    finalModelName: document.getElementById("finalModelName"),
+    finalModelProgress: document.getElementById("finalModelProgress"),
     historyCount: document.getElementById("historyCount"),
     historySearch: document.getElementById("historySearch"),
     historySelectionBar: document.getElementById("historySelectionBar"),
@@ -333,6 +336,17 @@
     realtimeEngine: "setRealtimeModel",
     finalEngine: "setFinalModel"
   });
+  const modelResourceAliases = Object.freeze({
+    realtimeEngine: {
+      streaming_paraformer: ["streaming-paraformer", "streaming-paraformer-bilingual", "streaming-paraformer-bilingual-zh-en", "paraformer-streaming"],
+      zipformer: ["zipformer", "zipformer-bilingual"]
+    },
+    finalEngine: {
+      faster_whisper_small: ["faster-whisper-small", "faster-whisper-small-gguf-q8-0"],
+      qwen3_asr_06b_int8: ["qwen3-asr-0.6b-int8", "qwen3-asr-06b-int8"],
+      qwen3_asr_17b_q5_k_m: ["qwen3-asr-1.7b-q5-k-m", "qwen3-asr-17b-q5-k-m", "qwen3-asr-1.7b-gguf-q5-k-m"]
+    }
+  });
 
   function callNative(method, ...args) {
     if (!native || typeof native[method] !== "function") {
@@ -593,8 +607,30 @@
     waveform.setActive(capturing);
     elements.resourceNotice.classList.toggle("is-hidden", !missingRequiredResources);
     elements.engineInputs.forEach((input) => { input.disabled = active; });
-    elements.activeModelsTitle.textContent = `实时显示：${realtimeModelName(state.settings.realtimeEngine)}`;
-    elements.activeModelsDetail.textContent = `最后识别：${finalModelName(state.settings.finalEngine)}`;
+    const currentRealtimeName = realtimeModelName(state.settings.realtimeEngine);
+    const currentFinalName = finalModelName(state.settings.finalEngine);
+    elements.realtimeModelName.textContent = currentRealtimeName;
+    elements.finalModelName.textContent = currentFinalName;
+    const updateModelCard = (button, progressElement, settingKey, modelName) => {
+      const resource = selectedModelResource(settingKey);
+      const measurable = Boolean(resource && resource.totalBytes > 0 && resource.presentBytes >= 0);
+      const progress = measurable ? Math.min(100, Math.max(0, resource.presentBytes / resource.totalBytes * 100)) : 0;
+      const resourceLoading = Boolean(resource && ["downloading", "pausing", "verifying"].includes(resource.status));
+      const preparing = active && phase === "preparing";
+      const loading = resourceLoading || preparing;
+      const indeterminate = loading && (!resourceLoading || !measurable);
+      const ready = resource?.status === "available";
+      button.classList.toggle("is-loading", loading);
+      button.classList.toggle("is-indeterminate", indeterminate);
+      button.classList.toggle("is-ready", ready && !loading);
+      button.style.setProperty("--model-progress", loading && !indeterminate ? `${progress.toFixed(1)}%` : "0%");
+      progressElement.textContent = resourceLoading && measurable ? `${Math.round(progress)}%` : "";
+      progressElement.classList.toggle("is-hidden", !progressElement.textContent);
+      button.setAttribute("aria-busy", String(loading));
+      button.setAttribute("aria-label", `${settingKey === "realtimeEngine" ? "实时显示" : "最后识别"}模型：${modelName}${loading ? `，正在加载${progressElement.textContent ? ` ${progressElement.textContent}` : ""}` : ""}`);
+    };
+    updateModelCard(elements.realtimeModelButton, elements.realtimeModelProgress, "realtimeEngine", currentRealtimeName);
+    updateModelCard(elements.finalModelButton, elements.finalModelProgress, "finalEngine", currentFinalName);
   }
 
   function renderHistory() {
@@ -953,23 +989,18 @@
   }
 
   function hasMissingRequiredResources() {
-    const aliases = {
-      realtimeEngine: {
-        streaming_paraformer: ["streaming-paraformer", "streaming-paraformer-bilingual", "streaming-paraformer-bilingual-zh-en", "paraformer-streaming"],
-        zipformer: ["zipformer", "zipformer-bilingual"]
-      },
-      finalEngine: {
-        faster_whisper_small: ["faster-whisper-small", "faster-whisper-small-gguf-q8-0"],
-        qwen3_asr_06b_int8: ["qwen3-asr-0.6b-int8", "qwen3-asr-06b-int8"],
-        qwen3_asr_17b_q5_k_m: ["qwen3-asr-1.7b-q5-k-m", "qwen3-asr-17b-q5-k-m", "qwen3-asr-1.7b-gguf-q5-k-m"]
-      }
-    };
     return ["realtimeEngine", "finalEngine"].some((settingKey) => {
-      const expected = aliases[settingKey][state.settings[settingKey]] || [];
+      const expected = modelResourceAliases[settingKey][state.settings[settingKey]] || [];
       const normalizedExpected = new Set(expected.map(normalizeModelId));
       const matches = state.resources.filter((item) => normalizedExpected.has(normalizeModelId(item.id)));
       return matches.length > 0 && !matches.some((item) => item.status === "available");
     });
+  }
+
+  function selectedModelResource(settingKey) {
+    const expected = modelResourceAliases[settingKey]?.[state.settings[settingKey]] || [];
+    const normalizedExpected = new Set(expected.map(normalizeModelId));
+    return state.resources.find((item) => normalizedExpected.has(normalizeModelId(item.id))) || null;
   }
 
   function normalizeModelId(value) {
@@ -1136,7 +1167,8 @@
     navigate("settings");
     openResourceManager();
   });
-  elements.activeModelsButton.addEventListener("click", () => navigate("settings"));
+  elements.realtimeModelButton.addEventListener("click", () => navigate("settings"));
+  elements.finalModelButton.addEventListener("click", () => navigate("settings"));
   elements.openResourceManagerButton.addEventListener("click", openResourceManager);
   elements.closeResourceManagerButton.addEventListener("click", closeResourceManager);
   elements.resourceManagerDialog.addEventListener("cancel", (event) => {

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>悬浮语音按钮</title>
-  <link rel="stylesheet" href="styles.css?v=20260823-02">
+  <link rel="stylesheet" href="styles.css?v=20260823-03">
 </head>
 <body>
   <a class="skip-link" href="#mainContent">跳到主要内容</a>
@@ -21,13 +21,26 @@
           </div>
         </header>
 
-        <button id="activeModelsButton" class="active-models-card" type="button" aria-label="查看识别模型">
-          <span class="active-models-copy">
-            <strong id="activeModelsTitle">实时显示：Streaming Paraformer</strong>
-            <strong id="activeModelsDetail">最后识别：Qwen3-ASR 1.7B Q5_K_M</strong>
-          </span>
-          <svg class="active-models-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg>
-        </button>
+        <div class="active-models-list" aria-label="当前识别模型">
+          <button id="realtimeModelButton" class="active-models-card" type="button" aria-label="查看实时显示模型">
+            <span class="active-model-progress" aria-hidden="true"></span>
+            <span class="active-models-copy">
+              <span class="active-model-label">实时显示</span>
+              <strong id="realtimeModelName">Streaming Paraformer</strong>
+              <small id="realtimeModelProgress" class="is-hidden"></small>
+            </span>
+            <svg class="active-models-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg>
+          </button>
+          <button id="finalModelButton" class="active-models-card" type="button" aria-label="查看最后识别模型">
+            <span class="active-model-progress" aria-hidden="true"></span>
+            <span class="active-models-copy">
+              <span class="active-model-label">最后识别</span>
+              <strong id="finalModelName">Qwen3-ASR 1.7B Q5_K_M</strong>
+              <small id="finalModelProgress" class="is-hidden"></small>
+            </span>
+            <svg class="active-models-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg>
+          </button>
+        </div>
 
         <section class="transcript-card" aria-labelledby="transcriptTitle">
           <div class="section-heading compact-heading">
@@ -312,6 +325,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script src="app.js?v=20260823-02" defer></script>
+  <script src="app.js?v=20260823-03" defer></script>
 </body>
 </html>
