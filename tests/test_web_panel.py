@@ -862,6 +862,14 @@ class WebPanelStaticTests(unittest.TestCase):
         self.assertNotIn("download_local_model", self.javascript)
         self.assertNotIn('id="recognitionModeOptions"', self.html)
 
+    def test_debug_mode_is_isolated_visual_simulation(self):
+        self.assertIn('data-view="debug"', self.html)
+        self.assertIn('id="debugModelControls"', self.html)
+        self.assertIn("这里只改变界面模拟数据", self.html)
+        self.assertIn("function debugModelPayload()", self.javascript)
+        self.assertIn("debugState.active", self.javascript)
+        self.assertNotIn('callApi("manage_local_model_resource"', self.javascript[self.javascript.index("function refreshDebugPreview()") : self.javascript.index("function bindEvents()")])
+
     def test_model_resource_panel_is_not_shown_in_local_model_details(self):
         self.assertNotIn('resourcePanel.className = "model-resource-panel"', self.javascript)
         self.assertNotIn(".model-resource-panel", self.css)

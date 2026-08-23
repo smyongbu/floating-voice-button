@@ -46,6 +46,10 @@
           <span class="nav-count" id="navHistoryCount">0</span>
           <span>识别历史</span>
         </button>
+        <button class="nav-item" type="button" data-view="debug" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 4h6M10 4v3l-4.5 7.5A3.5 3.5 0 0 0 8.5 20h7a3.5 3.5 0 0 0 3-5.5L14 7V4"/><path d="M7.5 14h9M9.5 17h5"/></svg>
+          <span>调试模式</span>
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -351,6 +355,19 @@
             <p id="onlineRecognitionSummary">在线识别会上传本次完整录音。</p>
             <button class="button button-primary" id="onlineModelSaveButton" type="button">保存并应用</button>
           </div>
+        </div>
+      </section>
+
+      <section class="view debug-view" id="debugView" aria-labelledby="debugTitle" hidden>
+        <header class="page-header">
+          <div><h1 id="debugTitle">调试模式</h1><p>模拟模型安装与下载状态，用于检查“本地模式”的视觉效果。</p></div>
+          <span class="debug-badge">仅调试</span>
+        </header>
+        <div class="debug-layout">
+          <section class="card debug-card"><div class="section-heading"><div><h2>快速场景</h2><p>一键切换常见安装组合。</p></div></div><div class="debug-presets" id="debugPresets"><button class="button button-secondary" type="button" data-debug-preset="default">首次安装版</button><button class="button button-secondary" type="button" data-debug-preset="empty">全部未安装</button><button class="button button-secondary" type="button" data-debug-preset="downloading">正在下载</button><button class="button button-secondary" type="button" data-debug-preset="complete">全部已安装</button><button class="button button-secondary" type="button" data-debug-preset="failed">下载失败</button></div></section>
+          <section class="card debug-card"><div class="section-heading"><div><h2>模型状态</h2><p>单独控制每个模型；修改后立即联动“本地模式”。</p></div></div><div class="debug-model-list" id="debugModelControls"></div></section>
+          <section class="card debug-card debug-progress-card"><div class="debug-progress-heading"><div><h2>下载进度</h2><p>用于下载中与暂停状态。</p></div><output id="debugProgressOutput" for="debugProgressRange">42%</output></div><input id="debugProgressRange" type="range" min="0" max="100" step="1" value="42"></section>
+          <div class="debug-footer"><p><strong>说明：</strong>这里只改变界面模拟数据，不会读取、安装或删除电脑中的真实模型。</p><button class="button button-primary" id="debugOpenLocalButton" type="button">查看本地模式效果</button></div>
         </div>
       </section>
 
