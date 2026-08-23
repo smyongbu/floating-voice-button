@@ -227,7 +227,9 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     pending?.let(handler::removeCallbacks)
-                    if (!longPressed) settleBallIfNeeded()
+                    if (!longPressed) {
+                        if (moved) snapBallToNearestEdge() else settleBallIfNeeded()
+                    }
                     true
                 }
                 else -> false
@@ -300,11 +302,8 @@ class FloatingVoiceService : Service(), RecognitionController.Listener {
     private fun snapBallToNearestEdge() {
         cancelSnapAnimation()
         val bounds = ballBounds()
-        attachedSide = FloatingOverlayGeometry.nearestSide(ballParams.x, bounds)
-        restorablePosition = FloatingOverlayGeometry.StoredPosition(
-            side = attachedSide,
-            normalizedY = FloatingOverlayGeometry.normalizedY(ballParams.y, bounds),
-        )
+        restorablePosition = FloatingOverlayGeometry.storedPosition(ballParams.x, ballParams.y, bounds)
+        attachedSide = restorablePosition.side
         OverlayPreferences.setPosition(this, restorablePosition)
         val startX = ballParams.x
         val startY = ballParams.y

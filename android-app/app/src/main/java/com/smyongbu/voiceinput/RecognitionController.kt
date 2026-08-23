@@ -14,11 +14,11 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
-import com.k2fsa.sherpa.onnx.OfflineParaformerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
+import com.k2fsa.sherpa.onnx.OnlineParaformerModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
@@ -29,6 +29,27 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 object RecognitionController {
+    const val REALTIME_STREAMING_PARAFORMER = "streaming_paraformer"
+    const val REALTIME_ZIPFORMER = "zipformer"
+    const val FINAL_FASTER_WHISPER_SMALL = "faster_whisper_small"
+    const val FINAL_QWEN3_ASR_06B_INT8 = "qwen3_asr_06b_int8"
+    const val FINAL_QWEN3_ASR_17B_Q5_K_M = "qwen3_asr_17b_q5_k_m"
+    val validRealtimeModels = setOf(
+        REALTIME_STREAMING_PARAFORMER,
+        REALTIME_ZIPFORMER,
+    )
+    val validFinalModels = setOf(
+        FINAL_FASTER_WHISPER_SMALL,
+        FINAL_QWEN3_ASR_06B_INT8,
+        FINAL_QWEN3_ASR_17B_Q5_K_M,
+    )
+    private const val KEY_REALTIME_MODEL = "realtime_model"
+    private const val KEY_FINAL_MODEL = "final_model"
+    private const val KEY_LEGACY_ENGINE = "engine"
+    private const val DEFAULT_REALTIME_MODEL = REALTIME_STREAMING_PARAFORMER
+    private const val DEFAULT_FINAL_MODEL = FINAL_QWEN3_ASR_17B_Q5_K_M
+
+    // 旧版网页与设置迁移仍会传这些值；新界面只使用上面的两组 wire value。
     const val ENGINE_DUAL = "local_dual"
     const val ENGINE_DUAL_QWEN = "local_dual_qwen"
     const val ENGINE_DUAL_WHISPER = "local_dual_whisper_acft"
@@ -61,7 +82,13 @@ object RecognitionController {
         val text: String
     )
 
-    private class Session(val id: Long, val engine: String, val testModeEnabled: Boolean) {
+    private class Session(
+        val id: Long,
+        val realtimeModel: String,
+        val finalModel: String,
+        val testModeEnabled: Boolean,
+    ) {
+        val engine = "$realtimeModel+$finalModel"
         val createdAt = System.currentTimeMillis()
         val cancelled = AtomicBoolean(false)
         val finished = AtomicBoolean(false)
@@ -102,9 +129,10 @@ object RecognitionController {
     @Volatile private var activeSession: Session? = null
     @Volatile private var audioRecord: AudioRecord? = null
     @Volatile private var cachedOnline: OnlineRecognizer? = null
+    @Volatile private var cachedOnlineResourceId: String? = null
     @Volatile private var cachedOffline: OfflineRecognizer? = null
     @Volatile private var cachedOfflineResourceId: String? = null
-    @Volatile private var cachedWhisper: WhisperAcftRecognizer? = null
+    @Volatile private var cachedTranscribe: TranscribeCppRecognizer? = null
     @Volatile private var modelStatus = "正在检查本地模型…"
     @Volatile private var listening = false
     @Volatile private var lastText = ""
@@ -117,8 +145,7 @@ object RecognitionController {
             logger = AppLogger(app)
             history = HistoryStore(app)
             ModelResourceManager.init(app)
-            val saved = app.getSharedPreferences("settings", 0).getString("engine", ENGINE_DUAL)
-            if (saved == "local") setEngine(ENGINE_DUAL)
+            migrateLegacySettings()
             preloadModels()
         }
     }
@@ -130,19 +157,84 @@ object RecognitionController {
 
     fun removeListener(listener: Listener) { listeners -= listener }
 
-    fun selectedEngine(): String = app.getSharedPreferences("settings", 0)
-        .getString("engine", ENGINE_DUAL)
-        .let { if (it in validEngines) it!! else ENGINE_DUAL }
+    fun selectedRealtimeModel(): String = app.getSharedPreferences("settings", 0)
+        .getString(KEY_REALTIME_MODEL, DEFAULT_REALTIME_MODEL)
+        .let { if (it in validRealtimeModels) it!! else DEFAULT_REALTIME_MODEL }
+
+    fun selectedFinalModel(): String = app.getSharedPreferences("settings", 0)
+        .getString(KEY_FINAL_MODEL, DEFAULT_FINAL_MODEL)
+        .let { if (it in validFinalModels) it!! else DEFAULT_FINAL_MODEL }
+
+    fun selectedEngine(): String = "${selectedRealtimeModel()}+${selectedFinalModel()}"
+
+    fun setRealtimeModel(model: String) {
+        updateModelSelection(
+            realtimeModel = model.takeIf { it in validRealtimeModels } ?: DEFAULT_REALTIME_MODEL,
+            finalModel = selectedFinalModel(),
+        )
+    }
+
+    fun setFinalModel(model: String) {
+        updateModelSelection(
+            realtimeModel = selectedRealtimeModel(),
+            finalModel = model.takeIf { it in validFinalModels } ?: DEFAULT_FINAL_MODEL,
+        )
+    }
 
     fun setEngine(engine: String) {
+        val selection = legacySelection(engine)
+        updateModelSelection(selection.first, selection.second)
+    }
+
+    private fun updateModelSelection(realtimeModel: String, finalModel: String) {
         app.getSharedPreferences("settings", 0).edit()
-            .putString("engine", if (engine in validEngines) engine else ENGINE_DUAL)
+            .putString(KEY_REALTIME_MODEL, realtimeModel)
+            .putString(KEY_FINAL_MODEL, finalModel)
+            .putString(KEY_LEGACY_ENGINE, "$realtimeModel+$finalModel")
             .apply()
         if (modelWorkerBusy()) {
             preloadPending.set(true)
             preloadRequests.incrementAndGet()
         } else {
             preloadModels()
+        }
+    }
+
+    private fun migrateLegacySettings() {
+        val preferences = app.getSharedPreferences("settings", 0)
+        val savedRealtime = preferences.getString(KEY_REALTIME_MODEL, null)
+            ?.takeIf { it in validRealtimeModels }
+        val savedFinal = preferences.getString(KEY_FINAL_MODEL, null)
+            ?.takeIf { it in validFinalModels }
+        if (savedRealtime != null && savedFinal != null) return
+
+        val migrated = legacySelection(preferences.getString(KEY_LEGACY_ENGINE, null))
+        preferences.edit()
+            .putString(KEY_REALTIME_MODEL, savedRealtime ?: migrated.first)
+            .putString(KEY_FINAL_MODEL, savedFinal ?: migrated.second)
+            .putString(
+                KEY_LEGACY_ENGINE,
+                "${savedRealtime ?: migrated.first}+${savedFinal ?: migrated.second}",
+            )
+            .apply()
+    }
+
+    private fun legacySelection(engine: String?): Pair<String, String> {
+        val combined = engine?.split("+", limit = 2)
+        if (
+            combined?.size == 2 &&
+            combined[0] in validRealtimeModels &&
+            combined[1] in validFinalModels
+        ) {
+            return combined[0] to combined[1]
+        }
+        return when (engine) {
+            ENGINE_DUAL_QWEN, ENGINE_QWEN ->
+                REALTIME_ZIPFORMER to FINAL_QWEN3_ASR_06B_INT8
+            ENGINE_DUAL, ENGINE_DUAL_WHISPER, ENGINE_ZIPFORMER,
+            ENGINE_PARAFORMER, ENGINE_WHISPER, "local" ->
+                REALTIME_ZIPFORMER to FINAL_FASTER_WHISPER_SMALL
+            else -> DEFAULT_REALTIME_MODEL to DEFAULT_FINAL_MODEL
         }
     }
 
@@ -166,8 +258,11 @@ object RecognitionController {
             publishIdle("没有麦克风权限，请在主界面授权。")
             return
         }
-        val engine = selectedEngine()
-        val missing = requiredResources(engine).filterNot(ModelResourceManager::isInstalled)
+        val realtimeModel = selectedRealtimeModel()
+        val finalModel = selectedFinalModel()
+        val engine = "$realtimeModel+$finalModel"
+        val missing = requiredResources(realtimeModel, finalModel)
+            .filterNot(ModelResourceManager::isInstalled)
         if (missing.isNotEmpty()) {
             logger.warning("识别启动被拒绝：模型资源未安装，方式=$engine", "recognition-resource")
             publishIdle("所选方案的模型尚未安装，请先到设置页下载。")
@@ -177,7 +272,8 @@ object RecognitionController {
             if (activeSession != null || localWorkerActive.get()) null
             else Session(
                 sessionIds.incrementAndGet(),
-                engine,
+                realtimeModel,
+                finalModel,
                 RecognitionTestMode.isEnabled(app),
             ).also {
                 activeSession = it
@@ -192,45 +288,14 @@ object RecognitionController {
         logger.info("识别会话开始，方式=${session.engine}", operationId(session))
         publish(session, false, "正在准备识别…", "", "preparing")
         publishLevel(session, 0f)
-        if (session.engine == ENGINE_SYSTEM) startSystem(session) else startLocal(session)
+        startLocal(session)
     }
 
     fun stop() {
         val session = activeSession ?: return
         if (session.finished.get()) return
-        if (session.engine == ENGINE_SYSTEM) {
-            session.stopRequested.set(true)
-            val speech = session.recognizer
-            if (session.retry != null || speech == null) {
-                session.retry?.let(main::removeCallbacks)
-                session.retry = null
-                finish(
-                    session,
-                    if (session.text.isBlank()) "系统识别已停止，没有可保存的文字。" else "系统识别完成",
-                    session.text,
-                    session.text.isNotBlank()
-                )
-            } else {
-                publish(session, false, "正在整理文字…", session.text, "processing")
-                speech.stopListening()
-            }
-        } else {
-            session.running.set(false)
-            publish(
-                session,
-                false,
-                when (session.engine) {
-                    ENGINE_ZIPFORMER -> "正在完成实时识别…"
-                    ENGINE_DUAL_WHISPER -> "正在进行第二次完整识别…"
-                    ENGINE_WHISPER -> "正在进行完整识别…"
-                    ENGINE_DUAL, ENGINE_DUAL_QWEN -> "正在进行分段二次识别…"
-                    ENGINE_PARAFORMER, ENGINE_QWEN -> "正在进行整段识别…"
-                    else -> "正在整理识别结果…"
-                },
-                session.text,
-                "processing"
-            )
-        }
+        session.running.set(false)
+        publish(session, false, "正在使用最终模型整理文字…", session.text, "processing")
     }
 
     fun cancel() {
@@ -238,21 +303,9 @@ object RecognitionController {
         if (session.finished.get()) return
         session.cancelled.set(true)
         session.running.set(false)
-        if (session.engine == ENGINE_DUAL_WHISPER || session.engine == ENGINE_WHISPER) {
-            runCatching { cachedWhisper?.cancel() }
-        }
+        runCatching { cachedTranscribe?.cancel() }
         logger.info("请求取消识别，方式=${session.engine}")
-        if (session.engine == ENGINE_SYSTEM) {
-            session.retry?.let(main::removeCallbacks)
-            session.retry = null
-            session.systemAttempt++
-            runCatching { session.recognizer?.cancel() }
-            runCatching { session.recognizer?.destroy() }
-            session.recognizer = null
-            finish(session, "本次识别已取消", "", false)
-        } else {
-            publish(session, false, "正在取消本次识别…", session.text, "processing")
-        }
+        publish(session, false, "正在取消本次识别…", session.text, "processing")
     }
 
     private fun preloadModels() {
@@ -269,15 +322,19 @@ object RecognitionController {
         Thread({
             val started = System.currentTimeMillis()
             try {
-                val engine = selectedEngine()
-                val required = requiredResources(engine).toSet()
+                val realtimeModel = selectedRealtimeModel()
+                val finalModel = selectedFinalModel()
+                val engine = "$realtimeModel+$finalModel"
+                val required = requiredResources(realtimeModel, finalModel).toSet()
                 val missing = required.filterNot(ModelResourceManager::isInstalled)
-                val hasOnline = ModelResourceManager.ZIPFORMER_ID in required &&
-                    ModelResourceManager.isInstalled(ModelResourceManager.ZIPFORMER_ID)
-                val correctionId = correctionResource(engine)
+                val onlineResourceId = realtimeResource(realtimeModel)
+                val hasOnline = onlineResourceId in required &&
+                    ModelResourceManager.isInstalled(onlineResourceId)
+                val correctionId = correctionResource(finalModel)
                 val hasOffline = correctionId != null && ModelResourceManager.isInstalled(correctionId)
-                val hasWhisper = WhisperAcftRecognizer.RESOURCE_ID in required &&
-                    ModelResourceManager.isInstalled(WhisperAcftRecognizer.RESOURCE_ID)
+                val transcribeId = transcribeResource(finalModel)
+                val hasTranscribe = transcribeId != null &&
+                    ModelResourceManager.isInstalled(transcribeId)
 
                 if (required.isNotEmpty() && missing.isEmpty() && canApplyPreload(requestId)) {
                     modelStatus = "正在预加载已安装的本地模型…"
@@ -291,9 +348,9 @@ object RecognitionController {
                     } else {
                         releaseUnusedRecognizers(required)
                         if (missing.isEmpty()) {
-                            if (hasOnline) getOnlineRecognizer()
+                            if (hasOnline) getOnlineRecognizer(realtimeModel)
                             if (hasOffline) getOfflineRecognizer(correctionId!!)
-                            if (hasWhisper) getWhisperRecognizer()
+                            if (hasTranscribe) getTranscribeRecognizer(finalModel)
                         }
                         true
                     }
@@ -301,11 +358,8 @@ object RecognitionController {
                 if (!applied || !canApplyPreload(requestId)) return@Thread
 
                 modelStatus = when {
-                    required.isEmpty() -> "手机系统识别已选用"
                     missing.isNotEmpty() -> "请到设置页下载所需的离线模型"
-                    hasOnline && hasWhisper -> "实时与 Whisper 二次识别模型已就绪"
-                    hasWhisper -> "Whisper 整段识别模型已就绪"
-                    hasOnline && hasOffline -> "双语实时与整段二次识别模型已就绪"
+                    hasOnline && (hasOffline || hasTranscribe) -> "实时显示与最终识别模型已就绪"
                     else -> "已安装的本地模型准备就绪"
                 }
                 currentStatus = modelStatus
@@ -342,19 +396,20 @@ object RecognitionController {
 
     private fun releaseUnusedRecognizers(required: Set<String>) {
         synchronized(modelLock) {
-            if (ModelResourceManager.ZIPFORMER_ID !in required) {
+            if (cachedOnlineResourceId !in required) {
                 runCatching { cachedOnline?.release() }
                 cachedOnline = null
+                cachedOnlineResourceId = null
             }
             if (cachedOfflineResourceId !in required) {
                 runCatching { cachedOffline?.release() }
                 cachedOffline = null
                 cachedOfflineResourceId = null
             }
-            if (WhisperAcftRecognizer.RESOURCE_ID !in required) {
-                runCatching { cachedWhisper?.cancel() }
-                runCatching { cachedWhisper?.close() }
-                cachedWhisper = null
+            if (cachedTranscribe?.model?.resourceId !in required) {
+                runCatching { cachedTranscribe?.cancel() }
+                runCatching { cachedTranscribe?.close() }
+                cachedTranscribe = null
             }
         }
     }
@@ -362,13 +417,7 @@ object RecognitionController {
     fun refreshModels() = preloadModels()
 
     fun refreshModel(id: String) {
-        if (id !in setOf(
-                ModelResourceManager.ZIPFORMER_ID,
-                ModelResourceManager.PARAFORMER_ID,
-                ModelResourceManager.QWEN_ID,
-                WhisperAcftRecognizer.RESOURCE_ID,
-            )
-        ) return
+        if (id !in ModelResourceManager.RECOGNITION_RESOURCE_IDS) return
         if (modelWorkerBusy()) {
             pendingModelReloads += id
             logger.info("模型已更新，将在当前识别结束后重新加载，资源=$id", "model-reload")
@@ -387,19 +436,26 @@ object RecognitionController {
         synchronized(modelLock) {
             if (modelWorkerBusy()) return false
             when (id) {
+                ModelResourceManager.STREAMING_PARAFORMER_ID,
                 ModelResourceManager.ZIPFORMER_ID -> {
-                    runCatching { cachedOnline?.release() }
-                    cachedOnline = null
+                    if (cachedOnlineResourceId == id) {
+                        runCatching { cachedOnline?.release() }
+                        cachedOnline = null
+                        cachedOnlineResourceId = null
+                    }
                 }
-                ModelResourceManager.PARAFORMER_ID, ModelResourceManager.QWEN_ID -> {
+                ModelResourceManager.QWEN_06B_ID -> {
                     runCatching { cachedOffline?.release() }
                     cachedOffline = null
                     cachedOfflineResourceId = null
                 }
-                WhisperAcftRecognizer.RESOURCE_ID -> {
-                    runCatching { cachedWhisper?.cancel() }
-                    runCatching { cachedWhisper?.close() }
-                    cachedWhisper = null
+                ModelResourceManager.FASTER_WHISPER_SMALL_ID,
+                ModelResourceManager.QWEN_17B_ID -> {
+                    if (cachedTranscribe?.model?.resourceId == id) {
+                        runCatching { cachedTranscribe?.cancel() }
+                        runCatching { cachedTranscribe?.close() }
+                        cachedTranscribe = null
+                    }
                 }
                 else -> return false
             }
@@ -421,27 +477,52 @@ object RecognitionController {
         if (activeSession == null) listeners.forEach { it.onRecognitionState(false, modelStatus, lastText) }
     }
 
-    private fun getOnlineRecognizer(): OnlineRecognizer {
+    private fun getOnlineRecognizer(realtimeModel: String): OnlineRecognizer {
         synchronized(modelLock) {
-            cachedOnline?.let { return it }
-            val dir = ModelResourceManager.bundleDirectory(ModelResourceManager.ZIPFORMER_ID).absolutePath
+            val resourceId = realtimeResource(realtimeModel)
+            cachedOnline?.takeIf { cachedOnlineResourceId == resourceId }?.let { return it }
+            runCatching { cachedOnline?.release() }
+            cachedOnline = null
+            cachedOnlineResourceId = null
+            val dir = ModelResourceManager.bundleDirectory(resourceId).absolutePath
+            val modelConfig = if (realtimeModel == REALTIME_STREAMING_PARAFORMER) {
+                OnlineModelConfig(
+                    paraformer = OnlineParaformerModelConfig(
+                        encoder = "$dir/encoder.int8.onnx",
+                        decoder = "$dir/decoder.int8.onnx",
+                    ),
+                    tokens = "$dir/tokens.txt",
+                    numThreads = 2,
+                    provider = "cpu",
+                    modelType = "paraformer",
+                )
+            } else {
+                OnlineModelConfig(
+                    transducer = OnlineTransducerModelConfig(
+                        encoder = "$dir/encoder-epoch-99-avg-1.int8.onnx",
+                        decoder = "$dir/decoder-epoch-99-avg-1.onnx",
+                        joiner = "$dir/joiner-epoch-99-avg-1.int8.onnx",
+                    ),
+                    tokens = "$dir/tokens.txt",
+                    numThreads = 2,
+                    provider = "cpu",
+                )
+            }
             return OnlineRecognizer(
                 config = OnlineRecognizerConfig(
-                    modelConfig = OnlineModelConfig(
-                        transducer = OnlineTransducerModelConfig(
-                            encoder = "$dir/encoder-epoch-99-avg-1.int8.onnx",
-                            decoder = "$dir/decoder-epoch-99-avg-1.onnx",
-                            joiner = "$dir/joiner-epoch-99-avg-1.int8.onnx"
-                        ),
-                        tokens = "$dir/tokens.txt",
-                        numThreads = 2,
-                        provider = "cpu"
-                    ),
+                    modelConfig = modelConfig,
                     enableEndpoint = true,
-                    decodingMethod = "modified_beam_search",
+                    decodingMethod = if (realtimeModel == REALTIME_ZIPFORMER) {
+                        "modified_beam_search"
+                    } else {
+                        "greedy_search"
+                    },
                     maxActivePaths = 4
                 )
-            ).also { cachedOnline = it }
+            ).also {
+                cachedOnline = it
+                cachedOnlineResourceId = resourceId
+            }
         }
     }
 
@@ -452,27 +533,20 @@ object RecognitionController {
             cachedOffline = null
             cachedOfflineResourceId = null
             val dir = ModelResourceManager.bundleDirectory(resourceId).absolutePath
-            val modelConfig = if (resourceId == ModelResourceManager.QWEN_ID) {
-                OfflineModelConfig(
-                    qwen3Asr = OfflineQwen3AsrModelConfig(
-                        convFrontend = "$dir/conv_frontend.onnx",
-                        encoder = "$dir/encoder.int8.onnx",
-                        decoder = "$dir/decoder.int8.onnx",
-                        tokenizer = "$dir/tokenizer"
-                    ),
-                    tokens = "",
-                    numThreads = 3,
-                    provider = "cpu"
-                )
-            } else {
-                OfflineModelConfig(
-                    paraformer = OfflineParaformerModelConfig("$dir/model.int8.onnx"),
-                    tokens = "$dir/tokens.txt",
-                    numThreads = 4,
-                    provider = "cpu",
-                    modelType = "paraformer"
-                )
+            check(resourceId == ModelResourceManager.QWEN_06B_ID) {
+                "不支持的 sherpa-onnx 最终模型：$resourceId"
             }
+            val modelConfig = OfflineModelConfig(
+                qwen3Asr = OfflineQwen3AsrModelConfig(
+                    convFrontend = "$dir/conv_frontend.onnx",
+                    encoder = "$dir/encoder.int8.onnx",
+                    decoder = "$dir/decoder.int8.onnx",
+                    tokenizer = "$dir/tokenizer"
+                ),
+                tokens = "",
+                numThreads = 3,
+                provider = "cpu"
+            )
             return OfflineRecognizer(
                 config = OfflineRecognizerConfig(
                     modelConfig = modelConfig
@@ -484,33 +558,44 @@ object RecognitionController {
         }
     }
 
-    private fun getWhisperRecognizer(): WhisperAcftRecognizer {
+    private fun getTranscribeRecognizer(finalModel: String): TranscribeCppRecognizer {
         synchronized(modelLock) {
-            cachedWhisper?.let { return it }
-            return WhisperAcftRecognizer.fromInstalledModel(app).also { cachedWhisper = it }
+            cachedTranscribe?.takeIf { it.model.wireValue == finalModel }?.let { return it }
+            runCatching { cachedTranscribe?.cancel() }
+            runCatching { cachedTranscribe?.close() }
+            cachedTranscribe = null
+            return TranscribeCppRecognizer.fromInstalledModel(app, finalModel)
+                .also { cachedTranscribe = it }
         }
     }
 
-    private fun requiredResources(engine: String): List<String> = when (engine) {
-        ENGINE_DUAL -> listOf(ModelResourceManager.ZIPFORMER_ID, ModelResourceManager.PARAFORMER_ID)
-        ENGINE_DUAL_QWEN -> listOf(ModelResourceManager.ZIPFORMER_ID, ModelResourceManager.QWEN_ID)
-        ENGINE_DUAL_WHISPER -> listOf(ModelResourceManager.ZIPFORMER_ID, WhisperAcftRecognizer.RESOURCE_ID)
-        ENGINE_ZIPFORMER -> listOf(ModelResourceManager.ZIPFORMER_ID)
-        ENGINE_PARAFORMER -> listOf(ModelResourceManager.PARAFORMER_ID)
-        ENGINE_QWEN -> listOf(ModelResourceManager.QWEN_ID)
-        ENGINE_WHISPER -> listOf(WhisperAcftRecognizer.RESOURCE_ID)
-        else -> emptyList()
+    private fun realtimeResource(realtimeModel: String): String =
+        if (realtimeModel == REALTIME_ZIPFORMER) {
+            ModelResourceManager.ZIPFORMER_ID
+        } else {
+            ModelResourceManager.STREAMING_PARAFORMER_ID
+        }
+
+    private fun finalResource(finalModel: String): String = when (finalModel) {
+        FINAL_FASTER_WHISPER_SMALL -> ModelResourceManager.FASTER_WHISPER_SMALL_ID
+        FINAL_QWEN3_ASR_06B_INT8 -> ModelResourceManager.QWEN_06B_ID
+        FINAL_QWEN3_ASR_17B_Q5_K_M -> ModelResourceManager.QWEN_17B_ID
+        else -> ModelResourceManager.QWEN_17B_ID
     }
 
-    private fun correctionResource(engine: String): String? = when (engine) {
-        ENGINE_DUAL -> ModelResourceManager.PARAFORMER_ID
-        ENGINE_DUAL_QWEN, ENGINE_QWEN -> ModelResourceManager.QWEN_ID
-        ENGINE_PARAFORMER -> ModelResourceManager.PARAFORMER_ID
+    private fun requiredResources(realtimeModel: String, finalModel: String): List<String> =
+        listOf(realtimeResource(realtimeModel), finalResource(finalModel))
+
+    private fun correctionResource(finalModel: String): String? = when (finalModel) {
+        FINAL_QWEN3_ASR_06B_INT8 -> ModelResourceManager.QWEN_06B_ID
         else -> null
     }
 
-    private fun usesWhisper(engine: String): Boolean =
-        engine == ENGINE_DUAL_WHISPER || engine == ENGINE_WHISPER
+    private fun transcribeResource(finalModel: String): String? = when (finalModel) {
+        FINAL_FASTER_WHISPER_SMALL -> ModelResourceManager.FASTER_WHISPER_SMALL_ID
+        FINAL_QWEN3_ASR_17B_Q5_K_M -> ModelResourceManager.QWEN_17B_ID
+        else -> null
+    }
 
     private fun isCurrent(session: Session, attempt: Int? = null): Boolean {
         return activeSession === session && !session.finished.get() &&
@@ -639,14 +724,17 @@ object RecognitionController {
             return
         }
         val engine = session.engine
-        val correctionId = correctionResource(engine)
-        val useWhisper = usesWhisper(engine)
-        val useRealtime = engine != ENGINE_PARAFORMER && engine != ENGINE_QWEN && engine != ENGINE_WHISPER
+        val correctionId = correctionResource(session.finalModel)
+        val useTranscribe = transcribeResource(session.finalModel) != null
+        val useWholeAudioFinal = session.finalModel == FINAL_FASTER_WHISPER_SMALL
+        val useSegmentedFinal = !useWholeAudioFinal
+        val useRealtime = true
         val useSherpaSecondPass = correctionId != null
-        val useSecondPass = useSherpaSecondPass || useWhisper
-        val ready = (!useRealtime || cachedOnline != null) &&
+        val useSecondPass = true
+        val ready = cachedOnline != null &&
+            cachedOnlineResourceId == realtimeResource(session.realtimeModel) &&
             (!useSherpaSecondPass || (cachedOffline != null && cachedOfflineResourceId == correctionId)) &&
-            (!useWhisper || cachedWhisper != null)
+            (!useTranscribe || cachedTranscribe?.model?.wireValue == session.finalModel)
         publish(session, false, if (ready) "正在启动本地录音…" else "正在准备本地模型…", "", "preparing")
         Thread({
             var online: OnlineRecognizer? = null
@@ -654,12 +742,10 @@ object RecognitionController {
             var record: AudioRecord? = null
             try {
                 var committedText = ""
-                if (useRealtime) {
-                    online = getOnlineRecognizer()
-                    stream = online.createStream()
-                }
+                online = getOnlineRecognizer(session.realtimeModel)
+                stream = online.createStream()
                 if (useSherpaSecondPass) getOfflineRecognizer(correctionId!!)
-                if (useWhisper) getWhisperRecognizer().prepareForSession()
+                if (useTranscribe) getTranscribeRecognizer(session.finalModel).prepareForSession()
                 if (session.cancelled.get() || !session.running.get() || !isCurrent(session)) {
                     finish(session, "本次识别已取消", "", false)
                     return@Thread
@@ -706,11 +792,11 @@ object RecognitionController {
                     val samples = FloatArray(count) { shorts[it] / 32768.0f }
                     recordedSamples += count
                     session.recordedSamples = recordedSamples
-                    if (useSherpaSecondPass) {
+                    if (useSegmentedFinal) {
                         pendingCorrectionChunks += samples
                         pendingCorrectionSamples += count
                     }
-                    if (useWhisper || session.testModeEnabled) {
+                    if (useWholeAudioFinal || session.testModeEnabled) {
                         wholeAudioChunks += samples
                         wholeAudioSamples += count
                     }
@@ -727,7 +813,7 @@ object RecognitionController {
                         }
                         if (online!!.isEndpoint(stream)) {
                             committedText = RecognitionText.combineSegments(committedText, partial)
-                            if (useSherpaSecondPass && pendingCorrectionSamples > 0) {
+                            if (useSegmentedFinal && pendingCorrectionSamples > 0) {
                                 correctionSegments += flattenSamples(
                                     pendingCorrectionChunks,
                                     pendingCorrectionSamples
@@ -770,13 +856,13 @@ object RecognitionController {
                     stream.release()
                     stream = null
                 }
-                if (useSherpaSecondPass && pendingCorrectionSamples > 0) {
+                if (useSegmentedFinal && pendingCorrectionSamples > 0) {
                     correctionSegments += flattenSamples(
                         pendingCorrectionChunks,
                         pendingCorrectionSamples
                     )
                 }
-                val wholeAudio = if (useWhisper || session.testModeEnabled) {
+                val wholeAudio = if (useWholeAudioFinal || session.testModeEnabled) {
                     flattenSamples(wholeAudioChunks, wholeAudioSamples)
                 } else {
                     FloatArray(0)
@@ -785,30 +871,37 @@ object RecognitionController {
                 pendingCorrectionChunks.clear()
                 var secondPassFailed = false
                 val secondPass = try {
-                    when {
-                        useWhisper -> {
+                    when (session.finalModel) {
+                        FINAL_FASTER_WHISPER_SMALL -> {
                             publish(
                                 session,
                                 false,
-                                if (useRealtime) {
-                                    "正在使用 Whisper 对原始录音进行第二次完整识别…"
-                                } else {
-                                    "正在使用 Whisper 对原始录音进行完整识别…"
-                                },
+                                "正在使用 Faster-Whisper Small 生成最终文字…",
                                 realtime,
                                 "processing",
                             )
                             RecognitionText.cleanRealtime(
-                                runWhisperTranscription(session, wholeAudio)
+                                runTranscribeFinal(session, wholeAudio)
                             )
                         }
-                        useSherpaSecondPass -> {
+                        FINAL_QWEN3_ASR_06B_INT8, FINAL_QWEN3_ASR_17B_Q5_K_M -> {
+                            publish(
+                                session,
+                                false,
+                                "正在使用最终模型分段整理文字…",
+                                realtime,
+                                "processing",
+                            )
                             var correctedText = ""
                             correctionSegments.forEachIndexed { index, segment ->
-                                val segmentText = runOfflineCorrection(segment, correctionId!!)
+                                val segmentText = if (session.finalModel == FINAL_QWEN3_ASR_06B_INT8) {
+                                    runOfflineCorrection(segment, correctionId!!)
+                                } else {
+                                    runTranscribeFinal(session, segment)
+                                }
                                 correctedText = RecognitionText.combineSegments(correctedText, segmentText)
                                 logger.info(
-                                    "分段二次识别完成，片段=${index + 1}/${correctionSegments.size}，样本=${segment.size}，字符数=${segmentText.length}",
+                                    "分段最终识别完成，片段=${index + 1}/${correctionSegments.size}，样本=${segment.size}，字符数=${segmentText.length}",
                                     operationId(session)
                                 )
                             }
@@ -830,11 +923,11 @@ object RecognitionController {
                 } finally {
                     correctionSegments.clear()
                 }
-                val final = if (useWhisper) {
+                val final = if (useTranscribe) {
                     RecognitionText.chooseWhisperFinal(
                         realtime = realtime,
                         whisper = secondPass,
-                        audioSampleCount = wholeAudio.size,
+                        audioSampleCount = session.recordedSamples,
                     )
                 } else {
                     RecognitionText.chooseFinal(realtime, secondPass)
@@ -874,14 +967,11 @@ object RecognitionController {
                         session,
                         if (finalText.isBlank()) "没有识别到文字，请再试一次。"
                         else if (secondPassFailed) "二次识别失败，已保留实时结果"
-                        else if (useWhisper && useRealtime && final.source == RecognitionResultSource.REALTIME) {
-                            "Whisper 未产生有效结果，已保留实时结果"
+                        else if (useTranscribe && final.source == RecognitionResultSource.REALTIME) {
+                            "最终模型未产生有效结果，已保留实时结果"
                         }
                         else if (useSecondPass && final.source == RecognitionResultSource.REALTIME) "已保留更完整的实时结果"
-                        else if (useWhisper && useRealtime) "Whisper 二次识别完成"
-                        else if (useWhisper) "Whisper 整段识别完成"
-                        else if (useSherpaSecondPass && useRealtime) "分段二次识别完成"
-                        else if (useSherpaSecondPass) "整段识别完成" else "实时识别完成",
+                        else "最终识别完成",
                         finalText,
                         finalText.isNotBlank(),
                         testCapture,
@@ -923,7 +1013,7 @@ object RecognitionController {
         }
     }
 
-    private fun runWhisperTranscription(session: Session, samples: FloatArray): String {
+    private fun runTranscribeFinal(session: Session, samples: FloatArray): String {
         val waiting = AtomicBoolean(true)
         val started = System.currentTimeMillis()
         val heartbeat = Thread({
@@ -935,22 +1025,22 @@ object RecognitionController {
                 }
                 if (waiting.get()) {
                     logger.info(
-                        "Whisper 整段识别仍在处理中，已等待=${System.currentTimeMillis() - started}毫秒",
+                        "最终模型仍在处理中，已等待=${System.currentTimeMillis() - started}毫秒",
                         operationId(session),
                     )
                 }
             }
-        }, "Whisper识别心跳-${session.id}").apply {
+        }, "最终识别心跳-${session.id}").apply {
             isDaemon = true
             start()
         }
         return try {
-            getWhisperRecognizer().transcribe(samples, "auto")
+            getTranscribeRecognizer(session.finalModel).transcribe(samples, "auto")
         } finally {
             waiting.set(false)
             heartbeat.interrupt()
             logger.info(
-                "Whisper 整段识别阶段结束，耗时=${System.currentTimeMillis() - started}毫秒",
+                "最终识别阶段结束，耗时=${System.currentTimeMillis() - started}毫秒",
                 operationId(session),
             )
         }

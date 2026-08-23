@@ -23,31 +23,57 @@ class ModelManifestTest(unittest.TestCase):
             resource.resource_id: sum(item.bytes for item in resource.files)
             for resource in resources
         }
+        self.assertEqual(
+            {
+                "streaming-paraformer-bilingual-zh-en",
+                "zipformer-bilingual",
+                "faster-whisper-small-gguf-q8-0",
+                "qwen3-asr-0.6b-int8",
+                "qwen3-asr-1.7b-gguf-q5-k-m",
+            },
+            set(totals),
+        )
+        self.assertEqual(237_202_501, totals["streaming-paraformer-bilingual-zh-en"])
         self.assertEqual(60_142_871, totals["zipformer-bilingual"])
-        self.assertEqual(81_904_027, totals["paraformer"])
-        self.assertEqual(81_768_602, totals["whisper-acft-multilingual-74"])
+        self.assertEqual(269_751_136, totals["faster-whisper-small-gguf-q8-0"])
+        self.assertEqual(987_015_347, totals["qwen3-asr-0.6b-int8"])
+        self.assertEqual(1_517_290_464, totals["qwen3-asr-1.7b-gguf-q5-k-m"])
         self.assertTrue(all(len(item.sha256) == 64 for resource in resources for item in resource.files))
 
-    def test_whisper_manifest_pins_model_identity_license_and_download(self):
+    def test_transcribe_gguf_resources_pin_model_identity_and_downloads(self):
         manifest = APP_ROOT / "app" / "src" / "main" / "assets" / "model-resources.json"
         resources = json.loads(manifest.read_text(encoding="utf-8"))["resources"]
-        whisper = next(item for item in resources if item["id"] == "whisper-acft-multilingual-74")
-        self.assertEqual("base-74m-q8_0-acft-2024-07-07", whisper["version"])
+        whisper = next(item for item in resources if item["id"] == "faster-whisper-small-gguf-q8-0")
+        self.assertEqual("c0214bd34be9296695486f838e0142f900803159-q8_0", whisper["version"])
         self.assertEqual("Apache-2.0", whisper["license"])
-        self.assertEqual("https://huggingface.co/futo-org/acft-whisper-base", whisper["source"])
-        self.assertEqual(
-            "https://huggingface.co/futo-org/acft-whisper-base/blob/main/LICENSE",
-            whisper["licenseUrl"],
-        )
+        self.assertEqual("https://huggingface.co/handy-computer/whisper-small-gguf", whisper["source"])
         self.assertEqual(
             [{
-                "path": "base_acft_q8_0.bin",
-                "bytes": 81_768_602,
-                "sha256": "e44f352c9aa2c3609dece20c733c4ad4a75c28cd9ab07d005383df55fa96efc4",
-                "url": "https://keyboard.futo.org/voice-input-multilingual-74.bin",
+                "path": "whisper-small-Q8_0.gguf",
+                "bytes": 269_751_136,
+                "sha256": "9b9c8811bbcc82a7766f0fb0925614bdacb0923b2cc630daeac17108b655b860",
+                "url": "https://huggingface.co/handy-computer/whisper-small-gguf/resolve/c0214bd34be9296695486f838e0142f900803159/whisper-small-Q8_0.gguf",
             }],
             whisper["files"],
         )
+        qwen = next(item for item in resources if item["id"] == "qwen3-asr-1.7b-gguf-q5-k-m")
+        self.assertEqual(
+            [{
+                "path": "Qwen3-ASR-1.7B-Q5_K_M.gguf",
+                "bytes": 1_517_290_464,
+                "sha256": "034c557fe92ff8fcd9a9c041cbdaad347be0a86a58d3a348f63cf3f0180879d0",
+                "url": "https://huggingface.co/handy-computer/Qwen3-ASR-1.7B-gguf/resolve/92282af1610a2db19d66f2bef1e260f5deca782d/Qwen3-ASR-1.7B-Q5_K_M.gguf",
+            }],
+            qwen["files"],
+        )
+
+    def test_transcribe_cpp_source_is_fixed_to_verified_upstream_archive(self):
+        cmake = (APP_ROOT / "app" / "src" / "main" / "cpp" / "CMakeLists.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("https://github.com/handy-computer/transcribe.cpp/archive/", cmake)
+        self.assertIn("ea077b87590bcfb090d7c38c03ab36cd1c7005d3", cmake)
+        self.assertIn("577826A626C85BD07E40EFADA8F9578BC2689132F14AD41B71EE496D9A9711D8", cmake)
 
     def test_manifest_rejects_path_traversal(self):
         payload = {

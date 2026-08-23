@@ -13,26 +13,22 @@
     },
     settings: {
       engine: "local_dual",
+      realtimeEngine: "streaming_paraformer",
+      finalEngine: "qwen3_asr_17b_q5_k_m",
       overlayEnabled: false,
       overlayTextEnabled: true,
       overlayOpacity: 72,
       overlaySize: 64,
       overlayPermission: false,
-      microphonePermission: false,
-      testModeEnabled: false
+      microphonePermission: false
     },
     resources: [],
     history: [],
     version: "",
     page: "recording",
-    engineMode: null,
     historyQuery: "",
-    historyTestOnly: false,
     historyVisibleCount: 40,
-    latestTestRecordId: null,
-    openTestRecordId: null,
-    testAudioPositionMs: 0,
-    testAudioPlaying: false
+    selectedHistoryIds: new Set()
   };
 
   const elements = {
@@ -50,22 +46,24 @@
     activeModelsButton: document.getElementById("activeModelsButton"),
     activeModelsTitle: document.getElementById("activeModelsTitle"),
     activeModelsDetail: document.getElementById("activeModelsDetail"),
-    testModeBanner: document.getElementById("testModeBanner"),
-    testModeBannerText: document.getElementById("testModeBannerText"),
-    openLatestTestButton: document.getElementById("openLatestTestButton"),
     historyCount: document.getElementById("historyCount"),
     historySearch: document.getElementById("historySearch"),
-    historyFilterButtons: [...document.querySelectorAll("[data-history-filter]")],
-    historyTestFilterCount: document.getElementById("historyTestFilterCount"),
+    historySelectionBar: document.getElementById("historySelectionBar"),
+    historySelectionCount: document.getElementById("historySelectionCount"),
+    copySelectedHistoryButton: document.getElementById("copySelectedHistoryButton"),
+    deleteSelectedHistoryButton: document.getElementById("deleteSelectedHistoryButton"),
+    cancelHistorySelectionButton: document.getElementById("cancelHistorySelectionButton"),
+    copyAllHistoryButton: document.getElementById("copyAllHistoryButton"),
     historyEmpty: document.getElementById("historyEmpty"),
     historyEmptyTitle: document.getElementById("historyEmptyTitle"),
     historyEmptyText: document.getElementById("historyEmptyText"),
     historyList: document.getElementById("historyList"),
     loadMoreHistory: document.getElementById("loadMoreHistory"),
     clearHistoryButton: document.getElementById("clearHistoryButton"),
-    engineInputs: [...document.querySelectorAll('input[name="engine"]')],
-    engineModeButtons: [...document.querySelectorAll(".engine-mode-switch [data-engine-mode]")],
-    engineCards: [...document.querySelectorAll(".engine-card[data-engine-mode]")],
+    engineInputs: [...document.querySelectorAll('input[name="realtimeEngine"], input[name="finalEngine"]')],
+    openResourceManagerButton: document.getElementById("openResourceManagerButton"),
+    resourceManagerDialog: document.getElementById("resourceManagerDialog"),
+    closeResourceManagerButton: document.getElementById("closeResourceManagerButton"),
     resourceList: document.getElementById("resourceList"),
     resourceAnnouncement: document.getElementById("resourceAnnouncement"),
     overlaySwitch: document.getElementById("overlaySwitch"),
@@ -83,35 +81,8 @@
     overlayWaveFront: document.getElementById("overlayWaveFront"),
     overlayWaveMiddle: document.getElementById("overlayWaveMiddle"),
     overlayWaveBack: document.getElementById("overlayWaveBack"),
-    testModeSwitch: document.getElementById("testModeSwitch"),
-    testModeDetails: document.getElementById("testModeDetails"),
-    testStorageSummary: document.getElementById("testStorageSummary"),
-    testModeEngineNote: document.getElementById("testModeEngineNote"),
-    openTestRecordsButton: document.getElementById("openTestRecordsButton"),
-    clearTestDataButton: document.getElementById("clearTestDataButton"),
     copyDiagnosticsButton: document.getElementById("copyDiagnosticsButton"),
     versionText: document.getElementById("versionText"),
-    testDetailDialog: document.getElementById("testDetailDialog"),
-    testDetailTitle: document.getElementById("testDetailTitle"),
-    closeTestDetailButton: document.getElementById("closeTestDetailButton"),
-    deleteTestRecordButton: document.getElementById("deleteTestRecordButton"),
-    testAudioPlayButton: document.getElementById("testAudioPlayButton"),
-    testAudioProgress: document.getElementById("testAudioProgress"),
-    testAudioCurrentTime: document.getElementById("testAudioCurrentTime"),
-    testAudioTotalTime: document.getElementById("testAudioTotalTime"),
-    testAudioDurationBadge: document.getElementById("testAudioDurationBadge"),
-    testDecisionText: document.getElementById("testDecisionText"),
-    testDifferenceSummary: document.getElementById("testDifferenceSummary"),
-    beforeCalibrationKicker: document.getElementById("beforeCalibrationKicker"),
-    beforeCalibrationTitle: document.getElementById("beforeCalibrationTitle"),
-    beforeCalibrationText: document.getElementById("beforeCalibrationText"),
-    afterCalibrationBlock: document.getElementById("afterCalibrationBlock"),
-    afterCalibrationKicker: document.getElementById("afterCalibrationKicker"),
-    afterCalibrationTitle: document.getElementById("afterCalibrationTitle"),
-    afterCalibrationText: document.getElementById("afterCalibrationText"),
-    copyBeforeCalibrationButton: document.getElementById("copyBeforeCalibrationButton"),
-    copyAfterCalibrationButton: document.getElementById("copyAfterCalibrationButton"),
-    testRecordMeta: document.getElementById("testRecordMeta"),
     confirmDialog: document.getElementById("confirmDialog"),
     confirmMessage: document.getElementById("confirmMessage"),
     confirmCancel: document.getElementById("confirmCancel"),
@@ -125,12 +96,11 @@
 
   let confirmAction = null;
   let confirmReturnFocus = null;
+  let resourceManagerReturnFocus = null;
   let toastTimer = 0;
   let previousRecognitionActive = false;
   let previewRecordingTimer = 0;
   let previewLevelTimer = 0;
-  let previewAudioTimer = 0;
-  let testDetailReturnFocus = null;
   let overlayPreviewRecording = false;
   let overlayPreviewPosition = { x: null, y: null, side: "right" };
   let overlayPreviewDrag = null;
@@ -359,6 +329,10 @@
 
   const waveform = new SmoothWaveform();
   const overlayWaveform = new CompactWaveform();
+  const modelBridgeMethods = Object.freeze({
+    realtimeEngine: "setRealtimeModel",
+    finalEngine: "setFinalModel"
+  });
 
   function callNative(method, ...args) {
     if (!native || typeof native[method] !== "function") {
@@ -372,22 +346,28 @@
     }
   }
 
+  function setModelSelection(settingKey, value) {
+    const method = modelBridgeMethods[settingKey];
+    if (!method) return;
+    callNative(method, String(value || ""));
+  }
+
   function runPreviewAction(method, args) {
     const resourceById = (id) => state.resources.find((item) => item.id === id);
     if (["ready", "setCurrentPage"].includes(method)) return undefined;
+    if (method === modelBridgeMethods.realtimeEngine || method === modelBridgeMethods.finalEngine) {
+      const settingKey = method === modelBridgeMethods.realtimeEngine ? "realtimeEngine" : "finalEngine";
+      state.settings[settingKey] = String(args[0] || state.settings[settingKey]);
+      renderSettings();
+      renderRecognition();
+      showToast("预览：识别模型已切换");
+      return undefined;
+    }
     if (method === "setEngine") {
       state.settings.engine = String(args[0] || "local_dual");
-      state.engineMode = isCorrectionEngine(state.settings.engine) ? "correction" : "recognition";
       renderSettings();
       renderRecognition();
       showToast("预览：识别方案已切换");
-      return undefined;
-    }
-    if (method === "setTestModeEnabled") {
-      state.settings.testModeEnabled = Boolean(args[0]);
-      renderSettings();
-      renderRecognition();
-      showToast(state.settings.testModeEnabled ? "测试模式已开启" : "测试模式已关闭，已有资料仍会保留");
       return undefined;
     }
     if (method === "toggleRecognition") {
@@ -399,32 +379,19 @@
       if (state.recognition.active) {
         window.clearTimeout(previewRecordingTimer);
         window.clearInterval(previewLevelTimer);
-        const hasCorrection = isCorrectionEngine(state.settings.engine);
         state.recognition = {
           active: true,
           capturing: false,
           phase: "processing",
-          status: hasCorrection ? "正在使用校准模型整理文字…" : "正在生成最终文字…",
+          status: "正在使用最后识别模型整理文字…",
           text: state.recognition.text
         };
         renderRecognition();
         previewRecordingTimer = window.setTimeout(() => {
           const rawText = "我今天要 review this project，然后 update the README and fix the login bug。";
-          const secondPassText = "我今天要 review this project，今天下午三点开会，然后 update the README and fix the login bug。";
           const id = Date.now();
           state.recognition = { active: false, capturing: false, phase: "idle", status: "识别完成", text: rawText };
-          const item = { id, text: rawText, createdAt: new Date().toISOString().replace("T", " ").slice(0, 19), engine: state.settings.engine };
-          if (state.settings.testModeEnabled) {
-            item.test = {
-              rawText,
-              secondPassText: hasCorrection ? secondPassText : null,
-              selected: hasCorrection ? (state.settings.engine === "local_dual_whisper_acft" ? "second_pass" : "realtime_draft") : "single_result",
-              audioAvailable: true,
-              durationMs: 12400,
-              audioBytes: 1232896
-            };
-            state.latestTestRecordId = id;
-          }
+          const item = { id, text: rawText, createdAt: new Date().toISOString().replace("T", " ").slice(0, 19), engine: state.settings.finalEngine };
           state.history.unshift(item);
           renderAll();
         }, 1100);
@@ -470,21 +437,13 @@
     }
     if (method === "deleteHistory") {
       state.history = state.history.filter((item) => Number(item.id) !== Number(args[0]));
-      if (Number(state.openTestRecordId) === Number(args[0])) closeTestDetail();
+      state.selectedHistoryIds.delete(Number(args[0]));
       renderHistory();
       renderSettings();
       return undefined;
     }
-    if (method === "clearHistory") { state.history = []; closeTestDetail(); renderHistory(); renderSettings(); return undefined; }
-    if (method === "clearTestData") {
-      state.history = state.history.map((item) => item.test ? { id: item.id, text: item.text, createdAt: item.createdAt, engine: item.engine } : item);
-      state.latestTestRecordId = null;
-      closeTestDetail();
-      renderAll();
-      showToast("测试录音和识别对照已清空，最终文字仍保留");
-      return undefined;
-    }
-    if (method === "copyText" || method === "copyHistory" || method === "copyDiagnostics" || method === "copyTestText") { showToast("预览：已模拟复制"); return undefined; }
+    if (method === "clearHistory") { state.history = []; state.selectedHistoryIds.clear(); renderHistory(); renderSettings(); return undefined; }
+    if (method === "copyText" || method === "copyHistory" || method === "copyDiagnostics") { showToast("预览：已模拟复制"); return undefined; }
     if (method === "setOverlayEnabled") { state.settings.overlayEnabled = Boolean(args[0]); state.settings.overlayPermission = true; renderSettings(); return undefined; }
     if (method === "setOverlayTextEnabled") { state.settings.overlayTextEnabled = Boolean(args[0]); renderSettings(); return undefined; }
     if (method === "setOverlayOpacity") { state.settings.overlayOpacity = Number(args[0]); renderSettings(); return undefined; }
@@ -502,29 +461,17 @@
       }
     }
     return {
-      recognition: { active: false, capturing: false, phase: "idle", status: "双语实时与整段校正模型已就绪", text: "" },
-      settings: { ...state.settings, testModeEnabled: true },
+      recognition: { active: false, capturing: false, phase: "idle", status: "实时与最后识别模型已就绪", text: "" },
+      settings: { ...state.settings },
       resources: [
-        { id: "zipformer-bilingual", name: "Zipformer｜中英双语实时模型", purpose: "边说边显示中文、英文和中英混说结果", version: "2024-03-20-exp32-int8", totalBytes: 60142871, presentBytes: 60142871, installedBytes: 60142871, status: "available", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
-        { id: "paraformer", name: "Paraformer｜中英双语整段校正模型", purpose: "停止后重新校正完整句子，改善长句连贯度", version: "2024-03-09-small-int8", totalBytes: 81904027, presentBytes: 81904027, installedBytes: 81904027, status: "available", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
-        { id: "qwen3-asr-0.6b-int8", name: "Qwen3-ASR 0.6B INT8 高质量校正模型", purpose: "停止后高质量校正中英文和中英混说；下载较大、处理较慢", version: "2026-03-25-int8", totalBytes: 987015347, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 0, errorMessage: "" },
-        { id: "whisper-acft-multilingual-74", name: "Whisper ACFT｜多语言整段模型", purpose: "停止后对原始录音进行完整识别；组合方案中作为第二次完整识别", version: "base-74m-q8_0-acft", totalBytes: 81768602, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 0, errorMessage: "" }
+        { id: "streaming-paraformer-bilingual-zh-en", name: "Streaming Paraformer", purpose: "边说边显示中英文识别文字", version: "8e40c432-int8", totalBytes: 237202501, presentBytes: 237202501, installedBytes: 237202501, status: "available", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
+        { id: "zipformer-bilingual", name: "Zipformer", purpose: "边说边显示中英文和中英混说识别文字", version: "2024-03-20-exp32-int8", totalBytes: 60142871, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
+        { id: "faster-whisper-small-gguf-q8-0", name: "Faster-Whisper Small", purpose: "停止后生成完整的最终识别文字", version: "c0214bd3-q8_0", totalBytes: 269751136, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
+        { id: "qwen3-asr-0.6b-int8", name: "Qwen3-ASR 0.6B INT8", purpose: "停止后生成中英文和中英混说最终文字", version: "68818b23-int8", totalBytes: 987015347, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
+        { id: "qwen3-asr-1.7b-gguf-q5-k-m", name: "Qwen3-ASR 1.7B Q5_K_M", purpose: "停止后生成高质量的中英文最终识别文字", version: "92282af1-q5_k_m", totalBytes: 1517290464, presentBytes: 1517290464, installedBytes: 1517290464, status: "available", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" }
       ],
       history: [
-        {
-          id: 3,
-          text: "我今天要 review this project，然后 update the README and fix the login bug。",
-          createdAt: "2026-08-20 14:32:00",
-          engine: "local_dual",
-          test: {
-            rawText: "我今天要 review this project，然后 update the README and fix the login bug。",
-            secondPassText: "我今天要 review this project，今天下午三点开会，然后 update the README and fix the login bug。",
-            selected: "realtime_draft",
-            audioAvailable: true,
-            durationMs: 12840,
-            audioBytes: 1268777
-          }
-        },
+        { id: 3, text: "我今天要 review this project，然后 update the README and fix the login bug。", createdAt: "2026-08-20 14:32:00", engine: "qwen3_asr_17b_q5_k_m" },
         { id: 2, text: "Please create a new note and copy this sentence.", createdAt: "2026-08-18 17:16:00", engine: "local_dual_qwen" },
         { id: 1, text: "这是一条较长的模拟历史记录，用于检查卡片换行、复制按钮和删除按钮在窄屏幕上的排版。", createdAt: "2026-08-18 16:03:00", engine: "local_zipformer" }
       ],
@@ -532,20 +479,23 @@
     };
   }
 
+  function mergeSettings(next) {
+    const merged = { ...state.settings, ...(next || {}) };
+    if (typeof next?.realtimeModel === "string") merged.realtimeEngine = next.realtimeModel;
+    if (typeof next?.finalModel === "string") merged.finalEngine = next.finalModel;
+    return merged;
+  }
+
   function applyFullState(next) {
     if (!next) return;
     if (next.recognition) state.recognition = next.recognition;
     if (next.settings) {
-      const previousEngine = state.settings.engine;
-      state.settings = next.settings;
-      if (state.settings.engine !== previousEngine) {
-        state.engineMode = isCorrectionEngine(state.settings.engine) ? "correction" : "recognition";
-      }
+      state.settings = mergeSettings(next.settings);
     }
     if (Array.isArray(next.resources)) state.resources = next.resources;
     if (Array.isArray(next.history)) {
       state.history = next.history;
-      updateLatestTestRecordId();
+      pruneHistorySelection();
     }
     if (typeof next.version === "string") state.version = next.version;
     renderAll();
@@ -576,22 +526,15 @@
         break;
       case "history":
         state.history = Array.isArray(event.history) ? event.history : [];
-        updateLatestTestRecordId();
-        if (state.openTestRecordId != null && !currentTestRecord()) closeTestDetail();
+        pruneHistorySelection();
         renderHistory();
         renderSettings();
         renderRecognition();
-        break;
-      case "testAudio":
-        receiveTestAudioState(event);
+        if (state.page === "history") scrollHistoryToLatest();
         break;
       case "settings":
         if (event.settings) {
-          const previousEngine = state.settings.engine;
-          state.settings = event.settings;
-          if (state.settings.engine !== previousEngine) {
-            state.engineMode = isCorrectionEngine(state.settings.engine) ? "correction" : "recognition";
-          }
+          state.settings = mergeSettings(event.settings);
         }
         renderSettings();
         renderRecognition();
@@ -650,81 +593,50 @@
     waveform.setActive(capturing);
     elements.resourceNotice.classList.toggle("is-hidden", !missingRequiredResources);
     elements.engineInputs.forEach((input) => { input.disabled = active; });
-    elements.engineModeButtons.forEach((button) => { button.disabled = active; });
-    elements.testModeSwitch.disabled = active;
-    const modelCopy = {
-      local_dual: ["Zipformer ＋ Paraformer", "2 套模型 · 实时出字，停止后分段校正"],
-      local_dual_qwen: ["Zipformer ＋ Qwen3-ASR", "2 套模型 · 实时出字，停止后高质量校正"],
-      local_dual_whisper_acft: ["Zipformer ＋ Whisper ACFT", "2 套模型 · 实时出字，停止后进行第二次完整识别"],
-      local_zipformer: ["仅 Zipformer", "1 套模型 · 只做实时识别"],
-      local_paraformer: ["仅 Paraformer", "1 套模型 · 停止后生成全文"],
-      local_qwen: ["仅 Qwen3-ASR", "1 套模型 · 停止后高质量生成全文"],
-      local_whisper_acft: ["Whisper ACFT 多语言", "1 套模型 · 停止后识别中英文混说"]
-    }[state.settings.engine] || ["正在读取模型", "请稍候"];
-    elements.activeModelsTitle.textContent = modelCopy[0];
-    elements.activeModelsDetail.textContent = modelCopy[1];
-    const testModeEnabled = Boolean(state.settings.testModeEnabled);
-    const hasCorrection = isCorrectionEngine(state.settings.engine);
-    const latestTestRecord = state.history.find((item) => Number(item.id) === Number(state.latestTestRecordId) && item.test);
-    const latestHasSecondPass = Boolean(testSecondPassText(latestTestRecord?.test));
-    const latestUsesWhisperSecondPass = Boolean(latestTestRecord && isWhisperSecondPassEngine(latestTestRecord.engine));
-    const currentUsesWhisperSecondPass = isWhisperSecondPassEngine(state.settings.engine);
-    const usesSystemRecognition = state.settings.engine === "system";
-    elements.testModeBanner.classList.toggle("is-hidden", !testModeEnabled);
-    elements.openLatestTestButton.classList.toggle("is-hidden", !latestTestRecord || active);
-    elements.testModeBannerText.textContent = usesSystemRecognition
-      ? "手机系统识别不保存测试录音，请切换本地方案"
-      : latestTestRecord && !active
-      ? latestHasSecondPass
-        ? latestUsesWhisperSecondPass
-          ? "测试资料已保存，可回听录音并比较实时初稿与第二次完整识别结果"
-          : "测试资料已保存，可回听录音并查看校准前后文字"
-        : "测试资料已保存，可回听录音并查看识别文字"
-      : phase === "processing"
-        ? hasCorrection
-          ? currentUsesWhisperSecondPass
-            ? "正在保留录音，并进行第二次完整识别"
-            : "正在保留录音，并生成校准前后对照"
-          : "正在保留录音和本次识别文字"
-        : hasCorrection
-          ? currentUsesWhisperSecondPass
-            ? "本次将保留实时初稿、第二次完整识别结果和录音"
-            : "本次将保留校准前文字、校准后文字和录音"
-          : "本次将保留识别文字和录音，不生成前后对照";
+    elements.activeModelsTitle.textContent = `实时显示：${realtimeModelName(state.settings.realtimeEngine)}`;
+    elements.activeModelsDetail.textContent = `最后识别：${finalModelName(state.settings.finalEngine)}`;
   }
 
   function renderHistory() {
     const query = state.historyQuery.trim().toLocaleLowerCase("zh-CN");
-    const testCount = state.history.filter((item) => item.test).length;
-    const scoped = state.historyTestOnly ? state.history.filter((item) => item.test) : state.history;
-    const filtered = scoped.filter((item) => [item.text, item.test?.rawText, item.test?.secondPassText]
-      .filter(Boolean)
-      .join(" ")
-      .toLocaleLowerCase("zh-CN")
-      .includes(query));
-    const visible = filtered.slice(0, state.historyVisibleCount).reverse();
-    elements.historyCount.textContent = state.historyTestOnly
-      ? `${testCount} 条测试记录`
-      : testCount
-        ? `${state.history.length} 条记录 · ${testCount} 条含测试资料`
-        : `${state.history.length} 条记录`;
-    elements.historyTestFilterCount.textContent = String(testCount);
-    elements.historyFilterButtons.forEach((button) => {
-      const active = button.dataset.historyFilter === (state.historyTestOnly ? "test" : "all");
-      button.setAttribute("aria-selected", String(active));
-    });
-    elements.historyEmptyTitle.textContent = state.historyTestOnly ? "还没有测试记录" : "识别完成后会出现在这里";
-    elements.historyEmptyText.textContent = state.historyTestOnly
-      ? "请先在设置中开启识别测试模式；之后录音和用于对照的两份识别文字会保存在这里。"
-      : "最多保存 500 条；本地识别不上传录音，系统识别取决于手机语音服务。";
+    pruneHistorySelection();
+    const filtered = state.history.filter((item) => String(item.text || "").toLocaleLowerCase("zh-CN").includes(query));
+    const ordered = [...filtered].sort((left, right) => historyTimestamp(left) - historyTimestamp(right));
+    const visible = ordered.slice(Math.max(0, ordered.length - state.historyVisibleCount));
+    elements.historyCount.textContent = state.history.length ? `${state.history.length} 条记录` : "还没有记录";
+    elements.historyEmptyTitle.textContent = "识别完成后会出现在这里";
+    elements.historyEmptyText.textContent = "最多保存 500 条；本地识别不上传录音，系统识别取决于手机语音服务。";
     elements.clearHistoryButton.disabled = state.history.length === 0;
+    elements.copyAllHistoryButton.disabled = filtered.length === 0;
+    const selectionCount = state.selectedHistoryIds.size;
+    elements.historySelectionBar.classList.toggle("is-hidden", selectionCount === 0);
+    elements.historyList.classList.toggle("is-selection-mode", selectionCount > 0);
+    elements.historySelectionCount.textContent = `已选择 ${selectionCount} 条`;
     elements.historyEmpty.classList.toggle("is-hidden", filtered.length > 0);
     elements.historyList.replaceChildren(...visible.map(createHistoryCard));
-    elements.loadMoreHistory.classList.toggle("is-hidden", visible.length >= filtered.length);
+    elements.loadMoreHistory.classList.toggle("is-hidden", visible.length >= ordered.length);
+  }
+
+  function historyTimestamp(item) {
+    const raw = String(item?.createdAt || "").replace(" ", "T");
+    const value = Date.parse(raw);
+    return Number.isFinite(value) ? value : Number(item?.id) || 0;
+  }
+
+  function pruneHistorySelection() {
+    const availableIds = new Set(state.history.map((item) => Number(item.id)));
+    [...state.selectedHistoryIds].forEach((id) => {
+      if (!availableIds.has(id)) state.selectedHistoryIds.delete(id);
+    });
+  }
+
+  function scrollHistoryToLatest() {
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reducedMotion.matches ? "auto" : "smooth" });
+    });
   }
 
   function createHistoryCard(item) {
-    if (item.test) return createTestHistoryCard(item);
     const card = document.createElement("article");
     card.className = "history-card";
     card.tabIndex = 0;
@@ -735,7 +647,7 @@
     text.textContent = String(item.text || "");
     const meta = document.createElement("p");
     meta.className = "history-meta";
-    meta.textContent = `${formatDate(item.createdAt)}　${engineName(item.engine)}`;
+    meta.textContent = `${formatDate(item.createdAt)}　${engineName(item.finalEngine || item.engine)}`;
     const copy = iconActionButton("复制", "copy", () => callNative("copyHistory", Number(item.id)));
     copy.classList.add("history-copy");
     const footer = document.createElement("div");
@@ -746,74 +658,66 @@
     });
     remove.classList.add("history-remove");
     const copyCard = () => callNative("copyHistory", Number(item.id));
-    card.addEventListener("click", copyCard);
-    card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        copyCard();
-      }
-    });
     [copy, remove].forEach((button) => button.addEventListener("click", (event) => event.stopPropagation()));
     card.append(remove, text, footer);
+    bindHistorySelection(card, item, copyCard);
     return card;
   }
 
-  function createTestHistoryCard(item) {
-    const card = document.createElement("article");
-    card.className = "history-card has-test-record";
-    const test = item.test;
-    const hasCorrection = testSecondPassText(test).length > 0;
-    const usesWhisperSecondPass = isWhisperSecondPassEngine(item.engine);
-    const diff = hasCorrection ? getDiffStats(test.rawText, testSecondPassText(test)) : { addedCount: 0, removedCount: 0 };
-
-    const head = document.createElement("div");
-    head.className = "history-test-head";
-    const badge = document.createElement("span");
-    badge.className = "history-test-badge";
-    badge.textContent = hasCorrection ? "测试记录" : "仅识别测试";
-    const difference = document.createElement("span");
-    difference.className = "history-test-difference";
-    difference.textContent = hasCorrection
-      ? diff.addedCount > 0
-        ? `${usesWhisperSecondPass ? "二次识别" : "校准"}新增 ${diff.addedCount} 字`
-        : usesWhisperSecondPass ? "二次识别无新增" : "校准无新增"
-      : "没有第二份识别结果";
-    head.append(badge, difference);
-
-    const text = document.createElement("p");
-    text.className = "history-text";
-    text.textContent = String(item.text || "");
-
-    const audio = document.createElement("span");
-    audio.className = "history-test-audio";
-    audio.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l10-2v12"></path><circle cx="6" cy="18" r="3"></circle><circle cx="16" cy="16" r="3"></circle></svg>';
-    const audioCopy = document.createElement("span");
-    audioCopy.textContent = test.audioAvailable ? `原始录音 ${formatDuration(test.durationMs)}` : "没有可用录音";
-    audio.append(audioCopy);
-
-    const meta = document.createElement("p");
-    meta.className = "history-meta";
-    meta.textContent = `${formatDate(item.createdAt)}　${engineName(item.engine)}`;
-    const copy = iconActionButton("复制最终文字", "copy", () => callNative("copyHistory", Number(item.id)));
-    copy.classList.add("history-test-copy");
-    const open = document.createElement("button");
-    open.type = "button";
-    open.className = "history-test-open";
-    open.textContent = hasCorrection ? (usesWhisperSecondPass ? "查看二次识别对照" : "查看校准对照") : "查看测试详情";
-    open.addEventListener("click", () => openTestDetail(item.id));
-    const actions = document.createElement("div");
-    actions.className = "history-test-actions";
-    actions.append(copy, open);
-    const footer = document.createElement("div");
-    footer.className = "history-test-footer";
-    footer.append(meta, actions);
-
-    const remove = iconActionButton("删除这条测试记录", "close", () => {
-      openConfirm("删除这条测试记录？最终文字、测试文字和录音都会删除，且无法恢复。", "确认删除", () => callNative("deleteHistory", Number(item.id)));
+  function bindHistorySelection(card, item, defaultAction) {
+    const id = Number(item.id);
+    let holdTimer = 0;
+    let longPressed = false;
+    let pointerStart = null;
+    const clearHold = () => {
+      window.clearTimeout(holdTimer);
+      holdTimer = 0;
+    };
+    const toggle = () => {
+      if (state.selectedHistoryIds.has(id)) state.selectedHistoryIds.delete(id);
+      else state.selectedHistoryIds.add(id);
+      renderHistory();
+    };
+    card.classList.toggle("is-selected", state.selectedHistoryIds.has(id));
+    card.setAttribute("aria-selected", String(state.selectedHistoryIds.has(id)));
+    card.addEventListener("pointerdown", (event) => {
+      if ((event.button !== undefined && event.button !== 0) || event.target.closest("button")) return;
+      longPressed = false;
+      pointerStart = { x: event.clientX, y: event.clientY };
+      holdTimer = window.setTimeout(() => {
+        longPressed = true;
+        toggle();
+        navigator.vibrate?.(28);
+      }, 520);
     });
-    remove.classList.add("history-remove");
-    card.append(remove, head, text, audio, footer);
-    return card;
+    card.addEventListener("pointermove", (event) => {
+      if (!pointerStart || !holdTimer) return;
+      if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 9) clearHold();
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach((name) => card.addEventListener(name, () => {
+      clearHold();
+      pointerStart = null;
+    }));
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("button")) return;
+      if (longPressed) {
+        event.preventDefault();
+        longPressed = false;
+        return;
+      }
+      if (state.selectedHistoryIds.size > 0) {
+        event.preventDefault();
+        toggle();
+        return;
+      }
+      defaultAction();
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      if (state.selectedHistoryIds.size > 0) toggle();
+      else defaultAction();
+    });
   }
 
   function iconActionButton(label, icon, action) {
@@ -830,12 +734,9 @@
   }
 
   function renderSettings() {
-    if (!state.engineMode) {
-      state.engineMode = isCorrectionEngine(state.settings.engine) ? "correction" : "recognition";
-    }
-    renderEngineMode();
     elements.engineInputs.forEach((input) => {
-      input.checked = input.value === state.settings.engine;
+      const settingKey = input.name === "realtimeEngine" ? "realtimeEngine" : "finalEngine";
+      input.checked = input.value === state.settings[settingKey];
     });
     elements.overlaySwitch.checked = Boolean(state.settings.overlayEnabled);
     elements.overlayTextSwitch.checked = state.settings.overlayTextEnabled !== false;
@@ -855,35 +756,7 @@
       : state.settings.overlayPermission
         ? "权限已允许，开启后可在其他应用上方识别。"
         : "首次开启时需要允许显示在其他应用上层。";
-    const testModeEnabled = Boolean(state.settings.testModeEnabled);
-    const testRecords = state.history.filter((item) => item.test);
-    const testBytes = testRecords.reduce((total, item) => total + Math.max(0, Number(item.test?.audioBytes) || 0), 0);
-    elements.testModeSwitch.checked = testModeEnabled;
-    elements.testModeDetails.classList.toggle("is-hidden", !testModeEnabled && testRecords.length === 0);
-    elements.testStorageSummary.textContent = testRecords.length
-      ? `${testRecords.length} 条测试记录 · ${formatBytes(testBytes)}`
-      : "还没有测试记录";
-    elements.clearTestDataButton.disabled = testRecords.length === 0;
-    elements.openTestRecordsButton.disabled = testRecords.length === 0;
-    elements.testModeEngineNote.textContent = !testModeEnabled
-      ? "测试模式已关闭，不会新增录音或识别对照；已有测试资料仍保留在本机。"
-      : state.settings.engine === "system"
-        ? "手机系统识别不保存测试录音，请切换本地方案。"
-        : isWhisperSecondPassEngine(state.settings.engine)
-        ? "当前方案会同时保存实时初稿、第二次完整识别结果和录音。"
-        : isCorrectionEngine(state.settings.engine)
-          ? "当前方案会同时保存校准前文字、校准后文字和录音。"
-          : "当前是“仅识别”方案，只会保存识别文字和录音，不会生成前后对照。";
     elements.versionText.textContent = state.version ? `悬浮语音按钮 ${state.version}` : "";
-  }
-
-  function renderEngineMode() {
-    elements.engineModeButtons.forEach((button) => {
-      button.setAttribute("aria-selected", String(button.dataset.engineMode === state.engineMode));
-    });
-    elements.engineCards.forEach((card) => {
-      card.hidden = card.dataset.engineMode !== state.engineMode;
-    });
   }
 
   function renderResources() {
@@ -990,222 +863,12 @@
     return button;
   }
 
-  function segmentMixedText(value) {
-    const text = String(value || "");
-    if (!text) return [];
-    if (typeof Intl.Segmenter === "function") {
-      const segmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
-      return [...segmenter.segment(text)].map((entry) => entry.segment);
-    }
-    return text.match(/[\p{Script=Han}]|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|\s+|[^\s]/gu) || [text];
-  }
-
-  function diffText(before, after) {
-    const left = segmentMixedText(before);
-    const right = segmentMixedText(after);
-    const matrix = Array.from({ length: left.length + 1 }, () => new Uint16Array(right.length + 1));
-    for (let i = left.length - 1; i >= 0; i -= 1) {
-      for (let j = right.length - 1; j >= 0; j -= 1) {
-        matrix[i][j] = left[i] === right[j]
-          ? matrix[i + 1][j + 1] + 1
-          : Math.max(matrix[i + 1][j], matrix[i][j + 1]);
-      }
-    }
-    const result = [];
-    let i = 0;
-    let j = 0;
-    while (i < left.length && j < right.length) {
-      if (left[i] === right[j]) {
-        result.push({ type: "same", value: left[i] });
-        i += 1;
-        j += 1;
-      } else if (matrix[i + 1][j] >= matrix[i][j + 1]) {
-        result.push({ type: "removed", value: left[i] });
-        i += 1;
-      } else {
-        result.push({ type: "added", value: right[j] });
-        j += 1;
-      }
-    }
-    while (i < left.length) result.push({ type: "removed", value: left[i++] });
-    while (j < right.length) result.push({ type: "added", value: right[j++] });
-    return result;
-  }
-
-  function countVisibleCharacters(value) {
-    return [...String(value || "").replace(/\s/gu, "")].length;
-  }
-
-  function getDiffStats(before, after) {
-    const parts = diffText(before, after);
-    return {
-      parts,
-      addedCount: parts.filter((part) => part.type === "added").reduce((total, part) => total + countVisibleCharacters(part.value), 0),
-      removedCount: parts.filter((part) => part.type === "removed").reduce((total, part) => total + countVisibleCharacters(part.value), 0)
-    };
-  }
-
-  function renderTextDifference(target, parts, view) {
-    const fragment = document.createDocumentFragment();
-    parts.forEach((part) => {
-      if (view === "before" && part.type === "added") return;
-      if (view === "after" && part.type === "removed") return;
-      if (part.type === "same") {
-        fragment.append(document.createTextNode(part.value));
-        return;
-      }
-      const node = document.createElement(part.type === "added" ? "mark" : "del");
-      node.className = part.type === "added" ? "diff-added" : "diff-removed";
-      node.textContent = part.value;
-      fragment.append(node);
-    });
-    target.replaceChildren(fragment);
-  }
-
-  function formatDuration(milliseconds) {
-    const totalSeconds = Math.max(0, Math.round((Number(milliseconds) || 0) / 1000));
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  }
-
-  function currentTestRecord() {
-    return state.history.find((item) => Number(item.id) === Number(state.openTestRecordId) && item.test) || null;
-  }
-
-  function openTestDetail(id) {
-    const item = state.history.find((entry) => Number(entry.id) === Number(id) && entry.test);
-    if (!item) {
-      showToast("这条记录没有测试资料");
-      return;
-    }
-    testDetailReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    state.openTestRecordId = item.id;
-    state.testAudioPositionMs = 0;
-    state.testAudioPlaying = false;
-    const test = item.test;
-    const secondPassText = testSecondPassText(test);
-    const hasCorrection = secondPassText.length > 0;
-    const usesWhisperSecondPass = isWhisperSecondPassEngine(item.engine);
-    elements.testDetailTitle.textContent = hasCorrection
-      ? usesWhisperSecondPass ? "二次识别对照" : "校准对照"
-      : "识别测试详情";
-    elements.testDifferenceSummary.classList.toggle("is-neutral", !hasCorrection);
-    elements.afterCalibrationBlock.classList.toggle("is-hidden", !hasCorrection);
-    elements.beforeCalibrationKicker.textContent = hasCorrection
-      ? usesWhisperSecondPass ? "Zipformer 实时识别" : "实时识别"
-      : "单模型识别";
-    elements.beforeCalibrationTitle.textContent = hasCorrection
-      ? usesWhisperSecondPass ? "实时初稿" : "校准前"
-      : "识别文字";
-    elements.afterCalibrationKicker.textContent = usesWhisperSecondPass ? "第二次完整识别" : "校准模型";
-    elements.afterCalibrationTitle.textContent = usesWhisperSecondPass ? "二次整段识别结果" : "校准后";
-    if (hasCorrection) {
-      const diff = getDiffStats(test.rawText, secondPassText);
-      renderTextDifference(elements.beforeCalibrationText, diff.parts, "before");
-      renderTextDifference(elements.afterCalibrationText, diff.parts, "after");
-      elements.testDecisionText.textContent = test.selected === "second_pass"
-        ? usesWhisperSecondPass ? "二次识别结果" : "校准后文字"
-        : usesWhisperSecondPass ? "实时初稿" : "校准前文字";
-      elements.testDifferenceSummary.textContent = diff.addedCount || diff.removedCount
-        ? [`新增 ${diff.addedCount} 字`, `删除 ${diff.removedCount} 字`].filter((value) => !value.includes(" 0 ")).join(" · ")
-        : "前后相同";
-    } else {
-      elements.beforeCalibrationText.replaceChildren(document.createTextNode(String(test.rawText || item.text || "")));
-      elements.afterCalibrationText.replaceChildren();
-      elements.testDecisionText.textContent = "识别文字";
-      elements.testDifferenceSummary.textContent = "没有第二份识别结果";
-    }
-    elements.testAudioProgress.max = String(Math.max(1, Number(test.durationMs) || 1));
-    elements.testAudioProgress.value = "0";
-    elements.testAudioTotalTime.textContent = formatDuration(test.durationMs);
-    elements.testAudioDurationBadge.textContent = formatDuration(test.durationMs);
-    elements.testRecordMeta.textContent = `${formatDate(item.createdAt)}　${engineName(item.engine)}　录音 ${formatBytes(test.audioBytes)}`;
-    setTestAudioPlaying(false);
-    updateTestAudioUi();
-    if (!elements.testDetailDialog.open) elements.testDetailDialog.showModal();
-    elements.closeTestDetailButton.focus();
-  }
-  function updateTestAudioUi() {
-    const item = currentTestRecord();
-    const duration = Math.max(1, Number(item?.test?.durationMs) || 1);
-    state.testAudioPositionMs = Math.min(duration, Math.max(0, Number(state.testAudioPositionMs) || 0));
-    elements.testAudioProgress.value = String(state.testAudioPositionMs);
-    elements.testAudioCurrentTime.textContent = formatDuration(state.testAudioPositionMs);
-  }
-
-  function setTestAudioPlaying(playing) {
-    state.testAudioPlaying = Boolean(playing);
-    elements.testAudioPlayButton.setAttribute("aria-pressed", String(state.testAudioPlaying));
-    elements.testAudioPlayButton.setAttribute("aria-label", state.testAudioPlaying ? "暂停测试录音" : "播放测试录音");
-  }
-
-  function receiveTestAudioState(event) {
-    if (Number(event.recordId) !== Number(state.openTestRecordId)) return;
-    if (Number.isFinite(Number(event.durationMs)) && Number(event.durationMs) > 0) {
-      elements.testAudioProgress.max = String(Number(event.durationMs));
-      elements.testAudioTotalTime.textContent = formatDuration(event.durationMs);
-      elements.testAudioDurationBadge.textContent = formatDuration(event.durationMs);
-    }
-    state.testAudioPositionMs = Number(event.positionMs) || 0;
-    setTestAudioPlaying(Boolean(event.playing));
-    updateTestAudioUi();
-  }
-
-  function stopTestAudioPlayback(reset = false) {
-    window.clearInterval(previewAudioTimer);
-    previewAudioTimer = 0;
-    if (native && typeof native.stopTestAudio === "function") callNative("stopTestAudio");
-    setTestAudioPlaying(false);
-    if (reset) state.testAudioPositionMs = 0;
-    if (elements.testDetailDialog.open) updateTestAudioUi();
-  }
-
-  function toggleTestAudioPlayback() {
-    const item = currentTestRecord();
-    if (!item?.test?.audioAvailable) {
-      showToast("这条记录没有可播放的录音");
-      return;
-    }
-    if (native && typeof native.toggleTestAudio === "function") {
-      callNative("toggleTestAudio", Number(item.id), Math.round(state.testAudioPositionMs));
-      return;
-    }
-    if (state.testAudioPlaying) {
-      window.clearInterval(previewAudioTimer);
-      previewAudioTimer = 0;
-      setTestAudioPlaying(false);
-      return;
-    }
-    const duration = Math.max(1, Number(item.test.durationMs) || 1);
-    if (state.testAudioPositionMs >= duration) state.testAudioPositionMs = 0;
-    setTestAudioPlaying(true);
-    previewAudioTimer = window.setInterval(() => {
-      state.testAudioPositionMs += 120;
-      if (state.testAudioPositionMs >= duration) {
-        state.testAudioPositionMs = duration;
-        updateTestAudioUi();
-        window.clearInterval(previewAudioTimer);
-        previewAudioTimer = 0;
-        setTestAudioPlaying(false);
-        return;
-      }
-      updateTestAudioUi();
-    }, 120);
-  }
-  function closeTestDetail() {
-    stopTestAudioPlayback(true);
-    if (elements.testDetailDialog.open) elements.testDetailDialog.close();
-    state.openTestRecordId = null;
-    const target = testDetailReturnFocus;
-    testDetailReturnFocus = null;
-    if (target?.isConnected) target.focus();
-  }
-
   function navigate(page) {
     if (!["recording", "history", "settings"].includes(page) || state.page === page) return;
+    if (page !== "settings" && elements.resourceManagerDialog.open) closeResourceManager();
     state.page = page;
     state.historyVisibleCount = 40;
+    if (page !== "history") state.selectedHistoryIds.clear();
     elements.pages.forEach((section) => {
       const active = section.dataset.page === page;
       section.hidden = !active;
@@ -1226,6 +889,7 @@
     waveform.refreshVisibility();
     overlayWaveform.refreshVisibility();
     if (page === "settings") window.requestAnimationFrame(ensureOverlayPreviewPosition);
+    if (page === "history") scrollHistoryToLatest();
   }
 
   function openConfirm(message, acceptLabel, action) {
@@ -1245,13 +909,32 @@
     if (target?.isConnected) target.focus();
   }
 
+  function openResourceManager() {
+    if (elements.resourceManagerDialog.open) return;
+    resourceManagerReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    elements.resourceManagerDialog.showModal();
+    elements.closeResourceManagerButton.focus();
+  }
+
+  function closeResourceManager() {
+    if (elements.resourceManagerDialog.open) elements.resourceManagerDialog.close();
+    const target = resourceManagerReturnFocus;
+    resourceManagerReturnFocus = null;
+    if (target?.isConnected) target.focus();
+  }
+
   function handleBack() {
     if (elements.confirmDialog.open) {
       closeConfirm();
       return true;
     }
-    if (elements.testDetailDialog.open) {
-      closeTestDetail();
+    if (elements.resourceManagerDialog.open) {
+      closeResourceManager();
+      return true;
+    }
+    if (state.page === "history" && state.selectedHistoryIds.size > 0) {
+      state.selectedHistoryIds.clear();
+      renderHistory();
       return true;
     }
     if (state.page !== "recording") {
@@ -1270,16 +953,42 @@
   }
 
   function hasMissingRequiredResources() {
-    const requirements = {
-      local_dual: ["zipformer-bilingual", "paraformer"],
-      local_dual_qwen: ["zipformer-bilingual", "qwen3-asr-0.6b-int8"],
-      local_dual_whisper_acft: ["zipformer-bilingual", "whisper-acft-multilingual-74"],
-      local_zipformer: ["zipformer-bilingual"],
-      local_paraformer: ["paraformer"],
-      local_qwen: ["qwen3-asr-0.6b-int8"],
-      local_whisper_acft: ["whisper-acft-multilingual-74"]
-    }[state.settings.engine] || [];
-    return requirements.some((id) => !state.resources.some((item) => item.id === id && item.status === "available"));
+    const aliases = {
+      realtimeEngine: {
+        streaming_paraformer: ["streaming-paraformer", "streaming-paraformer-bilingual", "streaming-paraformer-bilingual-zh-en", "paraformer-streaming"],
+        zipformer: ["zipformer", "zipformer-bilingual"]
+      },
+      finalEngine: {
+        faster_whisper_small: ["faster-whisper-small", "faster-whisper-small-gguf-q8-0"],
+        qwen3_asr_06b_int8: ["qwen3-asr-0.6b-int8", "qwen3-asr-06b-int8"],
+        qwen3_asr_17b_q5_k_m: ["qwen3-asr-1.7b-q5-k-m", "qwen3-asr-17b-q5-k-m", "qwen3-asr-1.7b-gguf-q5-k-m"]
+      }
+    };
+    return ["realtimeEngine", "finalEngine"].some((settingKey) => {
+      const expected = aliases[settingKey][state.settings[settingKey]] || [];
+      const normalizedExpected = new Set(expected.map(normalizeModelId));
+      const matches = state.resources.filter((item) => normalizedExpected.has(normalizeModelId(item.id)));
+      return matches.length > 0 && !matches.some((item) => item.status === "available");
+    });
+  }
+
+  function normalizeModelId(value) {
+    return String(value || "").trim().toLocaleLowerCase("en-US").replace(/_/g, "-");
+  }
+
+  function realtimeModelName(value) {
+    return {
+      streaming_paraformer: "Streaming Paraformer",
+      zipformer: "Zipformer"
+    }[value] || "正在读取模型";
+  }
+
+  function finalModelName(value) {
+    return {
+      faster_whisper_small: "Faster-Whisper Small",
+      qwen3_asr_06b_int8: "Qwen3-ASR 0.6B INT8",
+      qwen3_asr_17b_q5_k_m: "Qwen3-ASR 1.7B Q5_K_M"
+    }[value] || "正在读取模型";
   }
 
   function resourceStatusName(status) {
@@ -1295,6 +1004,11 @@
   }
 
   function engineName(engine) {
+    const raw = String(engine || "");
+    if (raw.includes("+")) {
+      const [realtime, final] = raw.split("+", 2);
+      return `${realtimeModelName(realtime)} ＋ ${finalModelName(final)}`;
+    }
     return {
       local_dual: "实时＋校正",
       local_dual_qwen: "实时＋Qwen 校正",
@@ -1302,27 +1016,15 @@
       local_zipformer: "仅实时",
       local_paraformer: "仅整段",
       local_qwen: "仅 Qwen",
-      local_whisper_acft: "Whisper ACFT"
-    }[engine] || "未知方式";
+      local_whisper_acft: "Whisper ACFT",
+      streaming_paraformer: "Streaming Paraformer",
+      zipformer: "Zipformer",
+      faster_whisper_small: "Faster-Whisper Small",
+      qwen3_asr_06b_int8: "Qwen3-ASR 0.6B INT8",
+      qwen3_asr_17b_q5_k_m: "Qwen3-ASR 1.7B Q5_K_M"
+    }[raw] || "未知方式";
   }
 
-  function isCorrectionEngine(engine) {
-    return ["local_dual", "local_dual_qwen", "local_dual_whisper_acft"].includes(String(engine || ""));
-  }
-
-  function isWhisperSecondPassEngine(engine) {
-    return String(engine || "") === "local_dual_whisper_acft";
-  }
-
-  function testSecondPassText(test) {
-    if (!test) return "";
-    return typeof test.secondPassText === "string" ? test.secondPassText : "";
-  }
-
-  function updateLatestTestRecordId() {
-    const latest = state.history.find((item) => item && item.test);
-    state.latestTestRecordId = latest ? latest.id : null;
-  }
   function formatDate(raw) {
     if (!raw) return "时间未知";
     const date = new Date(`${String(raw).replace(" ", "T")}Z`);
@@ -1430,45 +1132,70 @@
   elements.recordButton.addEventListener("click", () => callNative("toggleRecognition"));
   elements.cancelButton.addEventListener("click", () => callNative("cancelRecognition"));
   elements.copyTranscriptButton.addEventListener("click", () => callNative("copyText", state.recognition.text || ""));
-  elements.resourceNotice.addEventListener("click", () => navigate("settings"));
+  elements.resourceNotice.addEventListener("click", () => {
+    navigate("settings");
+    openResourceManager();
+  });
   elements.activeModelsButton.addEventListener("click", () => navigate("settings"));
-  elements.openLatestTestButton.addEventListener("click", () => openTestDetail(state.latestTestRecordId));
+  elements.openResourceManagerButton.addEventListener("click", openResourceManager);
+  elements.closeResourceManagerButton.addEventListener("click", closeResourceManager);
+  elements.resourceManagerDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeResourceManager();
+  });
+  elements.cancelHistorySelectionButton.addEventListener("click", () => {
+    state.selectedHistoryIds.clear();
+    renderHistory();
+  });
+  elements.copySelectedHistoryButton.addEventListener("click", () => {
+    const records = state.history
+      .filter((item) => state.selectedHistoryIds.has(Number(item.id)))
+      .sort((left, right) => historyTimestamp(left) - historyTimestamp(right));
+    if (!records.length) return;
+    callNative("copyText", records.map((item) => String(item.text || "")).join("\n\n"));
+  });
+  elements.deleteSelectedHistoryButton.addEventListener("click", () => {
+    const ids = [...state.selectedHistoryIds];
+    if (!ids.length) return;
+    openConfirm(`删除选中的 ${ids.length} 条记录？删除后无法恢复。`, "确认删除", () => {
+      state.selectedHistoryIds.clear();
+      renderHistory();
+      ids.forEach((id) => callNative("deleteHistory", id));
+    });
+  });
+  elements.copyAllHistoryButton.addEventListener("click", () => {
+    const query = state.historyQuery.trim().toLocaleLowerCase("zh-CN");
+    const records = state.history
+      .filter((item) => String(item.text || "").toLocaleLowerCase("zh-CN").includes(query))
+      .sort((left, right) => historyTimestamp(left) - historyTimestamp(right));
+    if (!records.length) return;
+    callNative("copyText", records.map((item) => String(item.text || "")).join("\n\n"));
+  });
   elements.historySearch.addEventListener("input", (event) => {
     state.historyQuery = event.target.value || "";
     state.historyVisibleCount = 40;
     renderHistory();
   });
-  elements.historyFilterButtons.forEach((button) => button.addEventListener("click", () => {
-    state.historyTestOnly = button.dataset.historyFilter === "test";
-    state.historyVisibleCount = 40;
-    renderHistory();
-    if (state.historyTestOnly) {
-      requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reducedMotion.matches ? "auto" : "smooth" }));
-    }
-  }));
   elements.loadMoreHistory.addEventListener("click", () => {
     state.historyVisibleCount += 40;
     renderHistory();
   });
   elements.clearHistoryButton.addEventListener("click", () => {
     if (!state.history.length) return;
-    openConfirm("清空全部识别记录？所有记录都会从这台手机中永久删除。", "确认清空", () => callNative("clearHistory"));
+    openConfirm("清空全部识别记录？所有记录都会从这台手机中永久删除。", "确认清空", () => {
+      state.selectedHistoryIds.clear();
+      callNative("clearHistory");
+    });
   });
   elements.engineInputs.forEach((input) => input.addEventListener("change", () => {
     if (state.recognition.active) {
       renderSettings();
-      showToast("识别结束后才能切换方案");
+      showToast("识别结束后才能切换模型");
       return;
     }
-    if (input.checked) callNative("setEngine", input.value);
-  }));
-  elements.engineModeButtons.forEach((button) => button.addEventListener("click", () => {
-    if (state.recognition.active) {
-      showToast("识别结束后才能切换方案");
-      return;
-    }
-    state.engineMode = button.dataset.engineMode;
-    renderEngineMode();
+    if (!input.checked) return;
+    const settingKey = input.name === "realtimeEngine" ? "realtimeEngine" : "finalEngine";
+    setModelSelection(settingKey, input.value);
   }));
   elements.overlaySwitch.addEventListener("change", () => {
     const enabled = elements.overlaySwitch.checked;
@@ -1498,31 +1225,6 @@
   elements.overlaySize.addEventListener("change", () => {
     callNative("setOverlaySize", Number(elements.overlaySize.value));
   });
-  elements.testModeSwitch.addEventListener("change", () => {
-    if (state.recognition.active) {
-      elements.testModeSwitch.checked = Boolean(state.settings.testModeEnabled);
-      showToast("识别结束后再更改测试模式");
-      return;
-    }
-    callNative("setTestModeEnabled", elements.testModeSwitch.checked);
-  });
-  elements.openTestRecordsButton.addEventListener("click", () => {
-    state.historyQuery = "";
-    state.historyTestOnly = true;
-    elements.historySearch.value = "";
-    navigate("history");
-    renderHistory();
-    requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reducedMotion.matches ? "auto" : "smooth" }));
-  });
-  elements.clearTestDataButton.addEventListener("click", () => {
-    if (!state.history.some((item) => item.test)) return;
-    openConfirm(
-      "清空全部测试资料？录音和测试文字将删除，最终识别文字会继续保留在普通记录中。",
-      "清空测试资料",
-      () => callNative("clearTestData")
-    );
-  });
-
   elements.overlayPreviewOrb.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || overlayPreviewDrag) return;
     overlayPreviewDrag = {
@@ -1570,42 +1272,6 @@
     window.requestAnimationFrame(updateOverlayPreviewTextPosition);
   });
   elements.copyDiagnosticsButton.addEventListener("click", () => callNative("copyDiagnostics"));
-  elements.closeTestDetailButton.addEventListener("click", closeTestDetail);
-  elements.testAudioPlayButton.addEventListener("click", toggleTestAudioPlayback);
-  elements.testAudioProgress.addEventListener("input", () => {
-    state.testAudioPositionMs = Number(elements.testAudioProgress.value) || 0;
-    updateTestAudioUi();
-  });
-  elements.testAudioProgress.addEventListener("change", () => {
-    const item = currentTestRecord();
-    if (item && native && typeof native.seekTestAudio === "function") {
-      callNative("seekTestAudio", Number(item.id), Math.round(state.testAudioPositionMs));
-    }
-  });
-  elements.copyBeforeCalibrationButton.addEventListener("click", () => {
-    const item = currentTestRecord();
-    if (item) callNative("copyTestText", item.test.rawText);
-  });
-  elements.copyAfterCalibrationButton.addEventListener("click", () => {
-    const item = currentTestRecord();
-    if (item) callNative("copyTestText", testSecondPassText(item.test));
-  });
-    elements.deleteTestRecordButton.addEventListener("click", () => {
-      const item = currentTestRecord();
-      if (!item) return;
-      const hasCorrection = testSecondPassText(item.test).length > 0;
-      openConfirm(
-        hasCorrection
-          ? "删除这条测试记录？最终文字、测试文字和录音都会删除，且无法恢复。"
-          : "删除这条测试记录？识别文字和录音都会删除，且无法恢复。",
-        "确认删除",
-        () => callNative("deleteHistory", Number(item.id))
-      );
-    });
-  elements.testDetailDialog.addEventListener("cancel", (event) => {
-    event.preventDefault();
-    closeTestDetail();
-  });
   elements.confirmCancel.addEventListener("click", closeConfirm);
   elements.confirmAccept.addEventListener("click", () => {
     const action = confirmAction;
@@ -1623,11 +1289,13 @@
   document.addEventListener("visibilitychange", () => {
     waveform.refreshVisibility();
     overlayWaveform.refreshVisibility();
-    if (document.hidden) stopTestAudioPlayback();
   });
   window.addEventListener("resize", () => window.requestAnimationFrame(ensureOverlayPreviewPosition));
 
   window.VoiceApp = { receive, handleBack };
   applyFullState(loadInitialState());
+  if (state.settings.testModeEnabled === true && native && typeof native.setTestModeEnabled === "function") {
+    callNative("setTestModeEnabled", false);
+  }
   callNative("ready");
 })();

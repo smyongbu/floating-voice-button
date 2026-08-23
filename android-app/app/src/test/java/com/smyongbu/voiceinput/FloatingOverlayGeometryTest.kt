@@ -45,6 +45,24 @@ class FloatingOverlayGeometryTest {
     }
 
     @Test
+    fun storedPositionCapturesVerticalMovementWhileAlreadyAttachedToAnEdge() {
+        val original = FloatingOverlayGeometry.storedPosition(
+            bounds.maxX,
+            FloatingOverlayGeometry.yFromNormalized(0.24f, bounds),
+            bounds,
+        )
+        val moved = FloatingOverlayGeometry.storedPosition(
+            bounds.maxX,
+            FloatingOverlayGeometry.yFromNormalized(0.81f, bounds),
+            bounds,
+        )
+
+        assertEquals(FloatingOverlayGeometry.Side.RIGHT, moved.side)
+        assertEquals(0.81f, moved.normalizedY, 0.002f)
+        assertTrue(moved.normalizedY > original.normalizedY)
+    }
+
+    @Test
     fun cubicEaseOutStartsQuicklyAndKeepsExactEndpoints() {
         assertEquals(0f, FloatingOverlayGeometry.easeOutCubic(0f), 0f)
         assertEquals(1f, FloatingOverlayGeometry.easeOutCubic(1f), 0f)

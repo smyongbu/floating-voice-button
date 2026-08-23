@@ -49,6 +49,11 @@ internal object FloatingOverlayGeometry {
         Side.RIGHT -> bounds.maxX
     }
 
+    fun storedPosition(x: Int, y: Int, bounds: Bounds): StoredPosition = StoredPosition(
+        side = nearestSide(x, bounds),
+        normalizedY = normalizedY(y, bounds),
+    )
+
     fun normalizedY(y: Int, bounds: Bounds): Float {
         val range = bounds.maxY - bounds.minY
         if (range <= 0) return 0.5f

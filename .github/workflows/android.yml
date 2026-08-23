@@ -4,7 +4,14 @@ on:
   push:
     branches:
       - agent/update-voice-recognition
+    paths:
+      - "android-app/**"
+      - ".github/workflows/android.yml"
   workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -70,8 +77,14 @@ jobs:
       - name: 验证安装包签名
         run: |
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           test -n "$APKSIGNER"
-          "$APKSIGNER" verify --verbose android-app/app/build/outputs/apk/debug/app-debug.apk
+          test -n "$AAPT"
+          APK="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          METADATA="android-app/app/build/outputs/apk/debug/apk-metadata.txt"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$METADATA"
+          "$AAPT" dump badging "$APK" | head -n 3 | tee -a "$METADATA"
+          sha256sum "$APK" | tee -a "$METADATA"
       - name: 检查安装包不含模型
         run: |
           MODEL_ENTRIES="$(unzip -Z1 android-app/app/build/outputs/apk/debug/app-debug.apk | grep -Ei '(^|/)(models|resource-packs)/|\.(onnx|ort|model|gguf|safetensors|pt)$|(^|/)(base_acft_q8_0|encoder|decoder|joiner|model)\.bin$' || true)"
@@ -83,7 +96,9 @@ jobs:
       - name: 保存安卓安装包
         uses: actions/upload-artifact@v4
         with:
-          name: 安卓语音输入-Whisper二次识别版
-          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          name: 安卓语音输入-五模型版
+          path: |
+            android-app/app/build/outputs/apk/debug/app-debug.apk
+            android-app/app/build/outputs/apk/debug/apk-metadata.txt
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3

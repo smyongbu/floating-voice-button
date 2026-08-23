@@ -330,6 +330,34 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         }
 
         @JavascriptInterface
+        fun setRealtimeModel(model: String) = runOnUiThread {
+            if (model !in RecognitionController.validRealtimeModels) return@runOnUiThread
+            if (RecognitionController.isListening()) {
+                emitSettings()
+                showMessage("识别结束后才能切换实时显示模型。")
+                return@runOnUiThread
+            }
+            RecognitionController.setRealtimeModel(model)
+            logger.info("实时显示模型已更改，模型=$model", "settings-realtime-model")
+            emitSettings()
+            showMessage("实时显示模型已保存。")
+        }
+
+        @JavascriptInterface
+        fun setFinalModel(model: String) = runOnUiThread {
+            if (model !in RecognitionController.validFinalModels) return@runOnUiThread
+            if (RecognitionController.isListening()) {
+                emitSettings()
+                showMessage("识别结束后才能切换最终识别模型。")
+                return@runOnUiThread
+            }
+            RecognitionController.setFinalModel(model)
+            logger.info("最终识别模型已更改，模型=$model", "settings-final-model")
+            emitSettings()
+            showMessage("最终识别模型已保存。")
+        }
+
+        @JavascriptInterface
         fun setOverlayEnabled(enabled: Boolean) = runOnUiThread { changeOverlay(enabled) }
 
         @JavascriptInterface
@@ -741,6 +769,8 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         appendLine("系统：Android ${Build.VERSION.RELEASE}（API ${Build.VERSION.SDK_INT}）")
         appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL}")
         appendLine("识别方案：${RecognitionController.selectedEngine()}")
+        appendLine("实时显示模型：${RecognitionController.selectedRealtimeModel()}")
+        appendLine("最终识别模型：${RecognitionController.selectedFinalModel()}")
         appendLine("识别测试模式：${RecognitionTestMode.isEnabled(this@MainActivity)}")
         appendLine("悬浮窗权限：${Settings.canDrawOverlays(this@MainActivity)}")
         appendLine("麦克风权限：${checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED}")
@@ -813,6 +843,8 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
 
     private fun settingsJson() = JSONObject().apply {
         put("engine", RecognitionController.selectedEngine())
+        put("realtimeModel", RecognitionController.selectedRealtimeModel())
+        put("finalModel", RecognitionController.selectedFinalModel())
         put("testModeEnabled", RecognitionTestMode.isEnabled(this@MainActivity))
         put("overlayEnabled", FloatingVoiceService.isRunning)
         put("overlayTextEnabled", OverlayPreferences.textEnabled(this@MainActivity))

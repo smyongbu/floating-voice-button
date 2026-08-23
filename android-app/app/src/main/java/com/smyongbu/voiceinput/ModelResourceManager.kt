@@ -33,10 +33,20 @@ data class ModelResourceState(
 )
 
 object ModelResourceManager {
+    const val STREAMING_PARAFORMER_ID = "streaming-paraformer-bilingual-zh-en"
     const val ZIPFORMER_ID = "zipformer-bilingual"
-    const val PARAFORMER_ID = "paraformer"
-    const val QWEN_ID = "qwen3-asr-0.6b-int8"
-    const val WHISPER_ACFT_ID = "whisper-acft-multilingual-74"
+    const val QWEN_06B_ID = "qwen3-asr-0.6b-int8"
+    const val FASTER_WHISPER_SMALL_ID = "faster-whisper-small-gguf-q8-0"
+    const val FASTER_WHISPER_SMALL_FILE = "whisper-small-Q8_0.gguf"
+    const val QWEN_17B_ID = "qwen3-asr-1.7b-gguf-q5-k-m"
+    const val QWEN_17B_FILE = "Qwen3-ASR-1.7B-Q5_K_M.gguf"
+    val RECOGNITION_RESOURCE_IDS = setOf(
+        STREAMING_PARAFORMER_ID,
+        ZIPFORMER_ID,
+        QWEN_06B_ID,
+        FASTER_WHISPER_SMALL_ID,
+        QWEN_17B_ID,
+    )
 
     interface Listener {
         fun onModelResourcesChanged(states: List<ModelResourceState>)
@@ -76,71 +86,135 @@ object ModelResourceManager {
 
     private val fallbackBundles = listOf(
         BundleSpec(
+            id = STREAMING_PARAFORMER_ID,
+            name = "Streaming Paraformer",
+            purpose = "边说边显示中英文识别文字",
+            version = "8e40c43232a1c5c66c82111efc5820d3accca11b-int8",
+            files = listOf(
+                FileSpec(
+                    "encoder.int8.onnx",
+                    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/encoder.int8.onnx",
+                    165_462_184,
+                    "81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a",
+                ),
+                FileSpec(
+                    "decoder.int8.onnx",
+                    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/decoder.int8.onnx",
+                    71_664_561,
+                    "f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f",
+                ),
+                FileSpec(
+                    "tokens.txt",
+                    "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/tokens.txt",
+                    75_756,
+                    "59aba8873a2ed1e122c25fee421e25f283b63290efbde85c1f01a853d83cb6e6",
+                ),
+            ),
+        ),
+        BundleSpec(
             id = ZIPFORMER_ID,
-            name = "中英双语实时模型",
-            purpose = "边说边显示中文、英文和中英混说结果",
+            name = "Zipformer",
+            purpose = "边说边显示中英文和中英混说识别文字",
             version = "2024-03-20-exp32-int8",
             files = listOf(
                 FileSpec(
                     "encoder-epoch-99-avg-1.int8.onnx",
                     "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/exp/32/encoder-epoch-99-avg-1.int8.onnx",
                     42_980_793,
-                    "db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb"
+                    "db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb",
                 ),
                 FileSpec(
                     "decoder-epoch-99-avg-1.onnx",
                     "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/exp/32/decoder-epoch-99-avg-1.onnx",
                     13_877_276,
-                    "89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906"
+                    "89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906",
                 ),
                 FileSpec(
                     "joiner-epoch-99-avg-1.int8.onnx",
                     "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/exp/32/joiner-epoch-99-avg-1.int8.onnx",
                     3_228_485,
-                    "bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9"
+                    "bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9",
                 ),
                 FileSpec(
                     "tokens.txt",
                     "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/data/lang_char_bpe/tokens.txt",
                     56_317,
-                    "a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3"
-                )
-            )
+                    "a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3",
+                ),
+            ),
         ),
         BundleSpec(
-            id = PARAFORMER_ID,
-            name = "中英双语整段校正模型",
-            purpose = "停止后重新校正完整句子，改善长句连贯度",
-            version = "2024-03-09-small-int8",
+            id = QWEN_06B_ID,
+            name = "Qwen3-ASR 0.6B INT8",
+            purpose = "停止后生成中英文和中英混说最终文字",
+            version = "2026-03-25-int8",
             files = listOf(
                 FileSpec(
-                    "model.int8.onnx",
-                    "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/63ddc3cd0f2810b68289a7b3876e62ef5d53d6df/model.int8.onnx",
-                    81_828_675,
-                    "3ef6c19369b912f7caf3cef8e545c5ccd1a33d9d7ec792a46668dc41c4b229ec"
+                    "conv_frontend.onnx",
+                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/conv_frontend.onnx",
+                    44_148_281,
+                    "d22dc4423e0940e49884e903d2ea2f7e5567c14fc1aed97e4e26d6b8f208ef9e",
                 ),
                 FileSpec(
-                    "tokens.txt",
-                    "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/63ddc3cd0f2810b68289a7b3876e62ef5d53d6df/tokens.txt",
-                    75_352,
-                    "4b2d964e18b9cf139b473003b6698fb2ed9a2a5ec55b93daa677b28f578897aa"
-                )
-            )
+                    "encoder.int8.onnx",
+                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/encoder.int8.onnx",
+                    182_491_662,
+                    "60748d3e6744a57c9c91e1b17424a6c2990567e8adceb0783940c03ed98fa9d9",
+                ),
+                FileSpec(
+                    "decoder.int8.onnx",
+                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/decoder.int8.onnx",
+                    755_914_231,
+                    "4f6885be5959ae26af3089d38ee7972c5fafbeeb1cf8d5e76eab6d8b61ca5771",
+                ),
+                FileSpec(
+                    "tokenizer/merges.txt",
+                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/tokenizer/merges.txt",
+                    1_671_853,
+                    "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+                ),
+                FileSpec(
+                    "tokenizer/tokenizer_config.json",
+                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/tokenizer/tokenizer_config.json",
+                    12_487,
+                    "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
+                ),
+                FileSpec(
+                    "tokenizer/vocab.json",
+                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/tokenizer/vocab.json",
+                    2_776_833,
+                    "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+                ),
+            ),
         ),
         BundleSpec(
-            id = WHISPER_ACFT_ID,
-            name = "Whisper ACFT 多语言整段模型",
-            purpose = "停止后对原始录音进行完整识别；组合方案中作为第二次完整识别，支持中文、英文和中英混说",
-            version = "base-74m-q8_0-acft-2024-07-07",
+            id = FASTER_WHISPER_SMALL_ID,
+            name = "Faster-Whisper Small",
+            purpose = "停止后生成完整的最终识别文字",
+            version = "c0214bd34be9296695486f838e0142f900803159-q8_0",
             files = listOf(
                 FileSpec(
-                    "base_acft_q8_0.bin",
-                    "https://keyboard.futo.org/voice-input-multilingual-74.bin",
-                    81_768_602,
-                    "e44f352c9aa2c3609dece20c733c4ad4a75c28cd9ab07d005383df55fa96efc4"
-                )
-            )
-        )
+                    FASTER_WHISPER_SMALL_FILE,
+                    "https://huggingface.co/handy-computer/whisper-small-gguf/resolve/c0214bd34be9296695486f838e0142f900803159/whisper-small-Q8_0.gguf",
+                    269_751_136,
+                    "9b9c8811bbcc82a7766f0fb0925614bdacb0923b2cc630daeac17108b655b860",
+                ),
+            ),
+        ),
+        BundleSpec(
+            id = QWEN_17B_ID,
+            name = "Qwen3-ASR 1.7B Q5_K_M",
+            purpose = "停止后生成高质量的中英文最终识别文字",
+            version = "92282af1610a2db19d66f2bef1e260f5deca782d-q5_k_m",
+            files = listOf(
+                FileSpec(
+                    QWEN_17B_FILE,
+                    "https://huggingface.co/handy-computer/Qwen3-ASR-1.7B-gguf/resolve/92282af1610a2db19d66f2bef1e260f5deca782d/Qwen3-ASR-1.7B-Q5_K_M.gguf",
+                    1_517_290_464,
+                    "034c557fe92ff8fcd9a9c041cbdaad347be0a86a58d3a348f63cf3f0180879d0",
+                ),
+            ),
+        ),
     )
 
     private val listeners = CopyOnWriteArrayList<Listener>()
