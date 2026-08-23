@@ -75,7 +75,10 @@
 - 标准 CPython 3.11（当前正式依赖的已验证版本），安装时勾选“添加到 PATH”；启动脚本会优先使用默认位置的 Python 3.11。本机 Anaconda Python 3.12 加载 `transcribe.cpp 0.2.1` 原生组件时会异常退出，不要用它启动本程序
 - Microsoft Edge WebView2 Runtime（Windows 11 通常已自带；缺少时需先安装）
 - Windows 所有现用模型统一以 `O:\程序\共享模型仓库` 为规范源；源码通过相对于共同上级目录的路径定位，也可用 `VOICE_INPUT_MODEL_REPOSITORY` 覆盖。运行时如需复制到 `%LOCALAPPDATA%\FloatingVoiceButton\models`，该副本仅是可重建缓存。删除应用缓存不会删除共享仓库，重新使用时直接从共享仓库恢复，不重复联网下载
-- GitHub Release 的编译版不内置任何模型。解压后，程序从 `语点.exe` 旁边独立的 `models` 文件夹读取外置模型；也可继续通过 `VOICE_INPUT_MODEL_REPOSITORY` 指定其他模型仓库。
+- 不带模型轻量升级版不会把模型编译进 EXE 或 ZIP。解压后，程序从 `语点.exe` 旁边独立的 `models` 文件夹读取外置模型；也可继续通过 `VOICE_INPUT_MODEL_REPOSITORY` 指定其他模型仓库。
+- Windows 编译版分为两种：第一次安装优先下载“首次安装版”，它在 `models` 文件夹附带 Faster-Whisper Small 与 Streaming Paraformer；以后升级可只下载“不带模型轻量升级版”，直接复用电脑上已经安装的模型，不重复下载模型文件。
+- 轻量升级不会删除 `%LOCALAPPDATA%\FloatingVoiceButton\models` 中的模型缓存。若模型放在旧版 `语点.exe` 旁边的 `models` 文件夹，升级时应保留该文件夹，或把它与新版程序放在同一目录。
+- `语点.exe`、任务管理器中的语点进程及 Windows 通知区域统一使用 `assets\app.ico` 应用图标。通知区域图标左键打开设置，右键打开与悬浮按钮相同的菜单。
 - 首次使用前运行 `python -m pip install -r requirements.txt`
 - 需要粘贴文字的目标软件与本程序应以相同权限运行；权限不同时 Windows 可能阻止自动粘贴
 
@@ -146,3 +149,11 @@
 python -m unittest discover -s tests -v
 python -m py_compile app.py automation.py audio_level.py cloud_asr.py config_store.py context_menu.py credential_store.py global_hotkey.py history_store.py live_transcript.py local_asr.py logger.py model_download.py overlay.py realtime_asr.py recognition_router.py settings_panel.py standby_listener.py test_mode_signal.py
 ```
+
+本地编译不带模型的轻量升级版：
+
+```powershell
+python tools\build_windows.py --variant lite
+```
+
+成品、SHA-256 校验文件和编译说明生成在 `发布版本`，模型与编译缓存不会提交到 Git。

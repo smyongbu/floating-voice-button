@@ -143,6 +143,7 @@ class VoiceButtonApp:
             hotkey=str(self.config["global_hotkey"]),
             button_color=str(self.config["button_color"]),
             button_opacity=int(self.config["button_opacity"]),
+            app_icon=ASSET_DIR / "app.ico",
         )
         self.transcript_window = LiveTranscriptWindow(
             self.window.hwnd, size, self._window_error
@@ -646,9 +647,15 @@ class VoiceButtonApp:
         if self.panel_process is not None and self.panel_process.poll() is None:
             return
         try:
+            if getattr(sys, "frozen", False):
+                command = [sys.executable, "--settings-panel"]
+                working_directory = Path(sys.executable).resolve().parent
+            else:
+                command = [sys.executable, str(PROJECT_DIR / "settings_panel.py")]
+                working_directory = PROJECT_DIR
             self.panel_process = subprocess.Popen(
-                [sys.executable, str(PROJECT_DIR / "settings_panel.py")],
-                cwd=str(PROJECT_DIR),
+                command,
+                cwd=str(working_directory),
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             self.run_log.info("设置窗口已打开")
@@ -1097,9 +1104,18 @@ def main() -> None:
     app.run()
 
 
+def run_entrypoint() -> None:
+    if "--settings-panel" in sys.argv[1:]:
+        from settings_panel import main as settings_main
+
+        settings_main()
+        return
+    main()
+
+
 if __name__ == "__main__":
     try:
-        main()
+        run_entrypoint()
     except Exception as exc:
         log_dir = DATA_DIR / "logs"
         _, error_log = build_loggers(log_dir)

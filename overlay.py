@@ -14,6 +14,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from context_menu import IndependentContextMenu, WM_DRAWITEM, WM_MEASUREITEM
 from global_hotkey import parse_hotkey
+from windows_tray import NotificationAreaIcon, destroy_icon, load_icon
 
 
 LRESULT = ctypes.c_ssize_t
@@ -182,6 +183,7 @@ WM_NCHITTEST = 0x0084
 WM_TIMER = 0x0113
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
+WM_LBUTTONDBLCLK = 0x0203
 WM_RBUTTONUP = 0x0205
 WM_CAPTURECHANGED = 0x0215
 WM_HOTKEY = 0x0312
@@ -749,6 +751,7 @@ class LayeredButtonWindow:
         hotkey: str = "Ctrl+Alt+Space",
         button_color: str = "#2563EB",
         button_opacity: int = 100,
+        app_icon: Path | None = None,
     ) -> None:
         self.title = title
         self.size = size
@@ -794,11 +797,19 @@ class LayeredButtonWindow:
         self._drag_timer_id = 0
         self._class_name = f"FloatingVoiceButton_{os.getpid()}"
         self._wndproc_ref = WNDPROC(self._wnd_proc)
+        self._app_icon_handle = load_icon(app_icon) if app_icon else 0
+        self._tray_icon: NotificationAreaIcon | None = None
         self._create_window()
         self._context_menu = IndependentContextMenu(
             self.hwnd,
             on_cleanup_error=self.on_error,
         )
+        if self._app_icon_handle:
+            self._tray_icon = NotificationAreaIcon(
+                self.hwnd,
+                self._app_icon_handle,
+                "语点",
+            )
         self.hotkey_registered, _reason = self.set_hotkey(hotkey)
 
     def _create_window(self) -> None:
@@ -807,6 +818,8 @@ class LayeredButtonWindow:
         window_class.cbSize = ctypes.sizeof(WNDCLASSEXW)
         window_class.lpfnWndProc = self._wndproc_ref
         window_class.hInstance = instance
+        window_class.hIcon = self._app_icon_handle
+        window_class.hIconSm = self._app_icon_handle
         window_class.lpszClassName = self._class_name
         if not user32.RegisterClassExW(ctypes.byref(window_class)):
             raise ctypes.WinError()
@@ -821,6 +834,18 @@ class LayeredButtonWindow:
 
     def _wnd_proc(self, hwnd, message, wparam, lparam):
         try:
+            tray_icon = getattr(self, "_tray_icon", None)
+            if tray_icon is not None and tray_icon.is_taskbar_created(message):
+                tray_icon.restore()
+                return 0
+            if tray_icon is not None and message == tray_icon.callback_message:
+                event = int(lparam) & 0xFFFF
+                if event in (WM_LBUTTONUP, WM_LBUTTONDBLCLK):
+                    self.on_open_panel()
+                    return 0
+                if event == WM_RBUTTONUP:
+                    self._show_menu()
+                    return 0
             if message in (WM_DRAWITEM, WM_MEASUREITEM):
                 if self._context_menu.handle_message(message, wparam, lparam):
                     return 1
@@ -898,6 +923,8 @@ class LayeredButtonWindow:
                 self._cancel_pointer_action(hwnd)
                 self._stop_shape_timer(hwnd)
                 self._unregister_hotkey()
+                if tray_icon is not None:
+                    tray_icon.remove()
                 self.on_close()
                 user32.PostQuitMessage(0)
                 return 0
@@ -1316,9 +1343,16 @@ class LayeredButtonWindow:
             user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
 
     def run(self) -> None:
-        self._render()
-        user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
-        message = MSG()
-        while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
-            user32.TranslateMessage(ctypes.byref(message))
-            user32.DispatchMessageW(ctypes.byref(message))
+        try:
+            self._render()
+            user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
+            message = MSG()
+            while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+                user32.TranslateMessage(ctypes.byref(message))
+                user32.DispatchMessageW(ctypes.byref(message))
+        finally:
+            if self._tray_icon is not None:
+                self._tray_icon.remove()
+            if self._app_icon_handle:
+                destroy_icon(self._app_icon_handle)
+                self._app_icon_handle = 0

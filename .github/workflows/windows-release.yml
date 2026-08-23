@@ -42,8 +42,10 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --onedir --windowed `
             --name "语点" `
+            --icon "assets/app.ico" `
             --add-data "web;web" `
             --add-data "assets;assets" `
+            --hidden-import settings_panel `
             --collect-all webview `
             --collect-all sherpa_onnx `
             --collect-all faster_whisper `

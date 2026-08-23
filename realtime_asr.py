@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import shutil
+import sys
 import threading
 import time
 import uuid
@@ -23,10 +24,18 @@ from config_store import (
 
 PROJECT_DIR = Path(__file__).resolve().parent
 MODEL_REPOSITORY_ENV = "VOICE_INPUT_MODEL_REPOSITORY"
+
+
+def _default_model_repository() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "models"
+    return PROJECT_DIR.parents[1] / "共享模型仓库"
+
+
 MODEL_REPOSITORY_ROOT = Path(
     os.environ.get(
         MODEL_REPOSITORY_ENV,
-        str(PROJECT_DIR.parents[1] / "共享模型仓库"),
+        str(_default_model_repository()),
     )
 ).expanduser()
 REALTIME_MODEL_SPECS: dict[str, dict[str, Any]] = {
