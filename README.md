@@ -18,7 +18,7 @@
 
 一个可选择本地模型或国内在线服务的 Windows 悬浮语音输入按钮。设置与历史记录使用本地 HTML、CSS、JavaScript 和系统 WebView2；悬浮层使用 Windows 逐像素 Alpha 分层窗口。默认使用本地识别，不会上传录音。项目内另有 `android-app` 安卓悬浮版源码与安装包。
 
-当前 Windows 源码版本为 `0.16.10`。
+当前 Windows 源码版本为 `0.16.11`。
 
 ## 共用悬浮按钮调试页
 
@@ -80,7 +80,7 @@
 - Windows 所有现用模型统一以 `O:\程序\共享模型仓库` 为规范源；源码通过相对于共同上级目录的路径定位，也可用 `VOICE_INPUT_MODEL_REPOSITORY` 覆盖。源码运行时直接读取共享仓库，不再复制或识别 `%LOCALAPPDATA%\FloatingVoiceButton\models` 中的旧开发缓存；共享仓库不可用时会明确显示模型不可用。编译后的正式 EXE 仍使用 `%LOCALAPPDATA%\FloatingVoiceButton\release-models-v1`，不会读取旧开发缓存；删除任何消费缓存都不会删除共享仓库。
 - 不带模型轻量升级版不会把模型编译进 EXE 或 ZIP。解压后，程序只从 `语点.exe` 旁边独立的 `models` 文件夹和正式版缓存读取模型；编译版不会使用开发专用的 `VOICE_INPUT_MODEL_REPOSITORY` 覆盖或 `%LOCALAPPDATA%\FloatingVoiceButton\models`。
 - 编译版必须先完整解压再运行，既可放在本机磁盘，也可从 NAS 或 `\\服务器\共享` 这类 UNC 网络路径启动。网络共享兼容依赖 `语点.exe` 同目录的 `语点.exe.config`，升级、复制或整理文件时不要删除；仍不能直接从 ZIP 内运行。
-- Windows 编译版分为两种：第一次安装优先下载“首次安装版”，它在 `models` 文件夹附带 Faster-Whisper Small 与 Streaming Paraformer；以后升级可只下载“不带模型轻量升级版”，直接复用电脑上已经安装的模型，不重复下载模型文件。
+- Windows Release 同时提供两种：轻量版不带模型，适合升级并复用已有模型；五模型完整版附带 Streaming Paraformer、Zipformer、Faster-Whisper Small、Qwen3-ASR 0.6B INT8 与 Qwen3-ASR 1.7B Q5_K_M。由于 GitHub 单个附件限制，完整版采用分卷 7z，需下载全部分卷后用 7-Zip 打开 `.7z.001`。
 - 轻量升级不会删除 `%LOCALAPPDATA%\FloatingVoiceButton\release-models-v1` 中的正式版模型缓存。源码开发缓存 `%LOCALAPPDATA%\FloatingVoiceButton\models` 会原样保留，但不会被正式 EXE 判定为已安装。若模型放在旧版 `语点.exe` 旁边的 `models` 文件夹，升级时应保留该文件夹，或把它与新版程序放在同一目录。
 - `语点.exe`、任务管理器中的语点进程及 Windows 通知区域统一使用 `assets\app.ico` 应用图标。通知区域图标左键打开设置，右键打开与悬浮按钮相同的菜单。
 - 首次使用前运行 `python -m pip install -r requirements.txt`

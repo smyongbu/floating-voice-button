@@ -1,68 +1,76 @@
-name: Windows 编译
-
+name: Windows 双版本发行
 on: workflow_dispatch
-
 permissions:
   contents: write
-
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 60
-
+    timeout-minutes: 180
     steps:
       - name: 检出源码
         uses: actions/checkout@v4
-
       - name: 配置 Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
       - name: 安装依赖
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller==6.15.0
-
       - name: 运行测试
         shell: pwsh
         run: python -m unittest discover -s tests -v
-
-      - name: 编译轻量升级版
+      - name: 编译轻量版
         shell: pwsh
         run: python tools/build_windows.py --variant lite
-
-      - name: 定位交付文件
+      - name: 下载并校验五个模型
+        shell: pwsh
+        run: python tools/prepare_full_windows_package.py --package-dir dist\语点
+      - name: 云端验收并制作分卷完整版
         shell: pwsh
         run: |
           $version = python -c "from tools.build_windows import APP_VERSION; print(APP_VERSION)"
-          $zipPath = Join-Path $PWD "发布版本\语点-Windows-$version-轻量升级版-不带模型.zip"
-          if (-not (Test-Path -LiteralPath $zipPath)) { throw "未找到编译产物：$zipPath" }
+          $lite = Join-Path $PWD "发布版本\语点-Windows-$version-轻量升级版-不带模型.zip"
+          if (-not (Test-Path -LiteralPath $lite)) { throw "未找到轻量版：$lite" }
+          $info = Get-Content -LiteralPath "dist\语点\build-info.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($info.appVersion -ne $version.TrimStart('v') -or $info.variant -ne 'full-with-5-models' -or $info.modelCount -ne 5 -or $info.modelFiles.Count -ne 18 -or $info.modelBytes -ne 3287863555) { throw "完整版元数据验收失败" }
+          $exeVersion = (Get-Item -LiteralPath "dist\语点\语点.exe").VersionInfo
+          if ($exeVersion.FileVersion -ne $version.TrimStart('v') -or $exeVersion.ProductVersion -ne $version.TrimStart('v')) { throw "EXE 版本号验收失败" }
+          $stage = Join-Path $PWD "build\full-release"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $root = Join-Path $stage "语点-Windows-$version"
+          Move-Item -LiteralPath "dist\语点" -Destination $root
+          $base = Join-Path $PWD "发布版本\Yudian-Windows-$version-full-with-5-models.7z"
+          & "C:\Program Files\7-Zip\7z.exe" a -t7z -mx=1 -mmt=on -v1900m $base $root
+          if ($LASTEXITCODE -ne 0) { throw "完整版分卷压缩失败" }
+          & "C:\Program Files\7-Zip\7z.exe" t "$base.001"
+          if ($LASTEXITCODE -ne 0) { throw "完整版分卷测试失败" }
+          $parts = @(Get-ChildItem -LiteralPath "发布版本" -Filter "Yudian-Windows-$version-full-with-5-models.7z.*" | Sort-Object Name)
+          if ($parts.Count -lt 2) { throw "完整版未正确生成多个分卷" }
+          if ($parts | Where-Object Length -GE 2GB) { throw "存在超过 GitHub 2 GiB 限制的分卷" }
+          $sumFile = Join-Path $PWD "发布版本\Yudian-Windows-$version-full-with-5-models.SHA256SUMS.txt"
+          $parts | ForEach-Object { "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant(), $_.Name } | Set-Content -LiteralPath $sumFile -Encoding UTF8
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "RELEASE_ZIP=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
+          "RELEASE_LITE=$lite" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_FULL_SUMS=$sumFile" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: 发布 GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $notesFile = "release-notes.md"
           @"
           ## 语点 $env:RELEASE_VERSION
 
-          - 支持 Streaming Paraformer 与 Zipformer 实时显示文字。
-          - 支持 Faster-Whisper Small、Qwen3-ASR 0.6B INT8 与 Qwen3-ASR 1.7B Q5_K_M 整段识别。
-          - 移除识别后通用文字校正，保留模型原始输出。
-          - 轻量版不包含模型；正式版复用自己的跨版本模型缓存，不读取源码开发缓存。
-          - ZIP 内根文件夹和 EXE 文件版本均与源码版本一致。
-          - 压缩包附带 SHA-256 校验文件。
-          "@ | Set-Content -Encoding UTF8 $notesFile
-          gh release create $env:RELEASE_VERSION `
-            $env:RELEASE_ZIP `
-            "$env:RELEASE_ZIP.sha256" `
-            --target $env:GITHUB_SHA `
-            --title "语点 $env:RELEASE_VERSION" `
-            --notes-file $notesFile
+          - **轻量版（不带模型）**：适合以后升级，复用已安装的模型。
+          - **五模型完整版**：附带 Streaming Paraformer、Zipformer、Faster-Whisper Small、Qwen3-ASR 0.6B INT8 与 Qwen3-ASR 1.7B Q5_K_M。
+
+          完整版采用 7z 分卷。请下载全部 `.7z.00x` 文件到同一目录，再使用 7-Zip 打开 `.7z.001` 解压。SHA-256 清单位于同一 Release。
+
+          GitHub Actions 已完成源码测试、模型字节数与 SHA-256 校验、EXE 版本检查和 7z 完整性测试。模型文件未提交到 Git 仓库。
+          "@ | Set-Content -Encoding UTF8 release-notes.md
+          $parts = @(Get-ChildItem -LiteralPath "发布版本" -Filter "Yudian-Windows-$env:RELEASE_VERSION-full-with-5-models.7z.*" | Sort-Object Name | ForEach-Object FullName)
+          $assets = @($env:RELEASE_LITE, "$env:RELEASE_LITE.sha256", $env:RELEASE_FULL_SUMS) + $parts
+          gh release create $env:RELEASE_VERSION $assets --target $env:GITHUB_SHA --title "语点 $env:RELEASE_VERSION" --notes-file release-notes.md
