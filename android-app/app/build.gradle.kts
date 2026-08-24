@@ -23,8 +23,8 @@ android {
         applicationId = "com.smyongbu.voiceinput"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "0.12.2"
+        versionCode = 20
+        versionName = "0.13.0"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild {
             cmake {

@@ -1,12 +1,13 @@
 # 安卓语音输入
 
-面向红米 K70 的本地中英双语语音识别 App，当前版本为 `0.12.2`。主界面统一使用本地 HTML、CSS 和 JavaScript，Kotlin 只负责 WebView 宿主、麦克风、识别模型、权限、历史数据库、下载器、通知和系统级悬浮窗等平台能力。Streaming Paraformer、Zipformer 与 Qwen3-ASR 0.6B INT8 使用 `sherpa-onnx 1.13.5`；Faster-Whisper Small 与 Qwen3-ASR 1.7B Q5_K_M 使用固定提交的 `transcribe.cpp` Android JNI 运行层。
+面向红米 K70 的本地中英双语语音识别 App，安装后名称为“语点”，当前版本为 `0.13.0`。主界面统一使用本地 HTML、CSS 和 JavaScript，Kotlin 只负责 WebView 宿主、麦克风、识别模型、权限、历史数据库、下载器、通知和系统级悬浮窗等平台能力。Streaming Paraformer、Zipformer 与 Qwen3-ASR 0.6B INT8 使用 `sherpa-onnx 1.13.5`；Faster-Whisper Small 与 Qwen3-ASR 1.7B Q5_K_M 使用固定提交的 `transcribe.cpp` Android JNI 运行层。
 
 ## 主要功能
 
 - “录音、记录、设置”位于同一个网页式单页界面中，切换页面时底栏不会重建；App 固定为竖屏。
 - 录音页依次显示当前模型、识别结果、声波与开始按钮；记录卡片整卡可复制，右下角显示复制图标，右上角使用灰色关闭图标删除。
 - 实际麦克风开始收音前明确显示“准备中”，开始收音后才进入“正在聆听”，避免漏掉开头。
+- 停止收音后会立即把音频加入后台最终识别队列，可以继续录制下一段；最终模型按录制顺序逐条处理，首页显示排队数量，记录页显示“最后识别中”或“排队等待”。队列最多等待 8 段，达到上限时会保留并保存实时文字，不丢失已有转写。
 - “实时显示”和“最后识别”是两个始终可见、彼此独立的模型选择组。实时显示可选 Streaming Paraformer 或 Zipformer；最后识别可选 Faster-Whisper Small、Qwen3-ASR 0.6B INT8 或 Qwen3-ASR 1.7B Q5_K_M。录音首页用两个独立卡片上下显示当前模型；下载或校验时卡片按真实字节进度填充并在模型名右侧显示百分比，模型可用后保持浅蓝色。
 - Streaming Paraformer 与 Zipformer 都在讲话时实时显示中文、英文及中英混说文字；Zipformer 使用 `modified_beam_search` 和 4 条活动路径，并在检测到句段端点后提交当前段、继续识别长句。
 - 停止收音后，所选最终模型直接读取本轮完整原始音频并生成最终文字。界面中的 Faster-Whisper Small 在 Android 上使用同一 Whisper Small 的 `transcribe.cpp` GGUF Q8_0 模型；Qwen3-ASR 1.7B Q5_K_M 同样由 `transcribe.cpp` 运行，Qwen3-ASR 0.6B INT8 继续由 `sherpa-onnx` 运行。

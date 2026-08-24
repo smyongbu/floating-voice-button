@@ -23,6 +23,7 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
+import java.util.ArrayDeque
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -79,7 +80,18 @@ object RecognitionController {
         val capturing: Boolean,
         val phase: String,
         val status: String,
-        val text: String
+        val text: String,
+        val finalProcessing: Boolean,
+        val finalQueueCount: Int,
+        val finalText: String,
+    )
+
+    data class PendingHistorySnapshot(
+        val id: Long,
+        val text: String,
+        val createdAt: Long,
+        val engine: String,
+        val queueStatus: String,
     )
 
     private class Session(
@@ -113,6 +125,15 @@ object RecognitionController {
         val audioSamples: FloatArray,
     )
 
+    private data class FinalJob(
+        val session: Session,
+        val realtime: String,
+        val correctionSegments: List<FloatArray>,
+        val wholeAudio: FloatArray,
+        val correctionResourceId: String?,
+        val useTranscribe: Boolean,
+    )
+
     private val listeners = CopyOnWriteArrayList<Listener>()
     private val main = Handler(Looper.getMainLooper())
     private val stateLock = Any()
@@ -121,12 +142,16 @@ object RecognitionController {
     private val preloadStarted = AtomicBoolean(false)
     private val preloadPending = AtomicBoolean(false)
     private val localWorkerActive = AtomicBoolean(false)
+    private val finalWorkerActive = AtomicBoolean(false)
+    private val finalQueueLock = Any()
+    private val finalQueue = ArrayDeque<FinalJob>()
     private val modelLock = Any()
     private val pendingModelReloads = ConcurrentHashMap.newKeySet<String>()
     private lateinit var app: Context
     private lateinit var logger: AppLogger
     private lateinit var history: HistoryStore
     @Volatile private var activeSession: Session? = null
+    @Volatile private var processingFinalJob: FinalJob? = null
     @Volatile private var audioRecord: AudioRecord? = null
     @Volatile private var cachedOnline: OnlineRecognizer? = null
     @Volatile private var cachedOnlineResourceId: String? = null
@@ -136,6 +161,7 @@ object RecognitionController {
     @Volatile private var modelStatus = "正在检查本地模型…"
     @Volatile private var listening = false
     @Volatile private var lastText = ""
+    @Volatile private var lastFinalText = ""
     @Volatile private var currentStatus = "正在检查本地模型…"
     @Volatile private var currentPhase = "idle"
 
@@ -240,14 +266,43 @@ object RecognitionController {
 
     fun isListening() = activeSession?.finished?.get() == false
 
-    private fun modelWorkerBusy(): Boolean = activeSession != null || localWorkerActive.get()
+    fun isBusy() = isListening() || finalWorkerActive.get() || synchronized(finalQueueLock) {
+        finalQueue.isNotEmpty()
+    }
 
-    fun snapshot() = StateSnapshot(
-        active = isListening(),
-        capturing = listening,
-        phase = currentPhase,
-        status = currentStatus,
-        text = lastText
+    private fun modelWorkerBusy(): Boolean =
+        activeSession != null || localWorkerActive.get() || finalWorkerActive.get() ||
+            synchronized(finalQueueLock) { finalQueue.isNotEmpty() }
+
+    fun snapshot(): StateSnapshot {
+        val queued = synchronized(finalQueueLock) { finalQueue.size }
+        return StateSnapshot(
+            active = isListening(),
+            capturing = listening,
+            phase = currentPhase,
+            status = currentStatus,
+            text = lastText,
+            finalProcessing = processingFinalJob != null,
+            finalQueueCount = queued,
+            finalText = lastFinalText,
+        )
+    }
+
+    fun pendingHistory(): List<PendingHistorySnapshot> {
+        val processing = processingFinalJob
+        val queued = synchronized(finalQueueLock) { finalQueue.toList() }
+        return buildList {
+            processing?.let { add(it.toPendingHistory("processing")) }
+            queued.forEach { add(it.toPendingHistory("queued")) }
+        }
+    }
+
+    private fun FinalJob.toPendingHistory(status: String) = PendingHistorySnapshot(
+        id = -session.id,
+        text = realtime.ifBlank { "等待生成最终文字" },
+        createdAt = session.createdAt,
+        engine = session.engine,
+        queueStatus = status,
     )
 
     fun toggle() { if (isListening()) stop() else start() }
@@ -303,7 +358,6 @@ object RecognitionController {
         if (session.finished.get()) return
         session.cancelled.set(true)
         session.running.set(false)
-        runCatching { cachedTranscribe?.cancel() }
         logger.info("请求取消识别，方式=${session.engine}")
         publish(session, false, "正在取消本次识别…", session.text, "processing")
     }
@@ -729,12 +783,8 @@ object RecognitionController {
         val useWholeAudioFinal = session.finalModel == FINAL_FASTER_WHISPER_SMALL
         val useSegmentedFinal = !useWholeAudioFinal
         val useRealtime = true
-        val useSherpaSecondPass = correctionId != null
-        val useSecondPass = true
         val ready = cachedOnline != null &&
-            cachedOnlineResourceId == realtimeResource(session.realtimeModel) &&
-            (!useSherpaSecondPass || (cachedOffline != null && cachedOfflineResourceId == correctionId)) &&
-            (!useTranscribe || cachedTranscribe?.model?.wireValue == session.finalModel)
+            cachedOnlineResourceId == realtimeResource(session.realtimeModel)
         publish(session, false, if (ready) "正在启动本地录音…" else "正在准备本地模型…", "", "preparing")
         Thread({
             var online: OnlineRecognizer? = null
@@ -744,8 +794,6 @@ object RecognitionController {
                 var committedText = ""
                 online = getOnlineRecognizer(session.realtimeModel)
                 stream = online.createStream()
-                if (useSherpaSecondPass) getOfflineRecognizer(correctionId!!)
-                if (useTranscribe) getTranscribeRecognizer(session.finalModel).prepareForSession()
                 if (session.cancelled.get() || !session.running.get() || !isCurrent(session)) {
                     finish(session, "本次识别已取消", "", false)
                     return@Thread
@@ -869,114 +917,17 @@ object RecognitionController {
                 }
                 wholeAudioChunks.clear()
                 pendingCorrectionChunks.clear()
-                var secondPassFailed = false
-                val secondPass = try {
-                    when (session.finalModel) {
-                        FINAL_FASTER_WHISPER_SMALL -> {
-                            publish(
-                                session,
-                                false,
-                                "正在使用 Faster-Whisper Small 生成最终文字…",
-                                realtime,
-                                "processing",
-                            )
-                            RecognitionText.cleanRealtime(
-                                runTranscribeFinal(session, wholeAudio)
-                            )
-                        }
-                        FINAL_QWEN3_ASR_06B_INT8, FINAL_QWEN3_ASR_17B_Q5_K_M -> {
-                            publish(
-                                session,
-                                false,
-                                "正在使用最终模型分段整理文字…",
-                                realtime,
-                                "processing",
-                            )
-                            var correctedText = ""
-                            correctionSegments.forEachIndexed { index, segment ->
-                                val segmentText = if (session.finalModel == FINAL_QWEN3_ASR_06B_INT8) {
-                                    runOfflineCorrection(segment, correctionId!!)
-                                } else {
-                                    runTranscribeFinal(session, segment)
-                                }
-                                correctedText = RecognitionText.combineSegments(correctedText, segmentText)
-                                logger.info(
-                                    "分段最终识别完成，片段=${index + 1}/${correctionSegments.size}，样本=${segment.size}，字符数=${segmentText.length}",
-                                    operationId(session)
-                                )
-                            }
-                            correctedText
-                        }
-                        else -> ""
-                    }
-                } catch (error: Throwable) {
-                    if (error is ThreadDeath) throw error
-                    if (session.cancelled.get()) throw error
-                    if (!useRealtime) throw error
-                    secondPassFailed = true
-                    logger.error(
-                        "二次识别失败，改用实时识别结果，方式=$engine",
-                        error,
-                        operationId(session)
-                    )
-                    ""
-                } finally {
-                    correctionSegments.clear()
-                }
-                val final = if (useTranscribe) {
-                    RecognitionText.chooseWhisperFinal(
+                enqueueFinal(
+                    FinalJob(
+                        session = session,
                         realtime = realtime,
-                        whisper = secondPass,
-                        audioSampleCount = session.recordedSamples,
+                        correctionSegments = correctionSegments.toList(),
+                        wholeAudio = wholeAudio,
+                        correctionResourceId = correctionId,
+                        useTranscribe = useTranscribe,
                     )
-                } else {
-                    RecognitionText.chooseFinal(realtime, secondPass)
-                }
-                val finalText = final.text
-                logger.info(
-                    "最终结果候选选择完成，来源=${final.source}，实时字符数=${realtime.length}，二次识别字符数=${secondPass.length}",
-                    operationId(session)
                 )
-                val testCapture = if (session.testModeEnabled) {
-                    if (useRealtime && useSecondPass) {
-                        TestCapture(
-                            realtimeDraft = realtime,
-                            secondPassText = secondPass.takeIf { it.isNotBlank() },
-                            selectedResult = if (final.source == RecognitionResultSource.CORRECTED) {
-                                TestSelectedResult.SECOND_PASS
-                            } else {
-                                TestSelectedResult.REALTIME_DRAFT
-                            },
-                            audioSamples = wholeAudio,
-                        )
-                    } else {
-                        TestCapture(
-                            realtimeDraft = finalText,
-                            secondPassText = null,
-                            selectedResult = TestSelectedResult.SINGLE_RESULT,
-                            audioSamples = wholeAudio,
-                        )
-                    }
-                } else {
-                    null
-                }
-                if (session.cancelled.get() || !isCurrent(session)) {
-                    finish(session, "本次识别已取消", "", false)
-                } else {
-                    finish(
-                        session,
-                        if (finalText.isBlank()) "没有识别到文字，请再试一次。"
-                        else if (secondPassFailed) "二次识别失败，已保留实时结果"
-                        else if (useTranscribe && final.source == RecognitionResultSource.REALTIME) {
-                            "最终模型未产生有效结果，已保留实时结果"
-                        }
-                        else if (useSecondPass && final.source == RecognitionResultSource.REALTIME) "已保留更完整的实时结果"
-                        else "最终识别完成",
-                        finalText,
-                        finalText.isNotBlank(),
-                        testCapture,
-                    )
-                }
+                correctionSegments.clear()
             } catch (e: Throwable) {
                 if (e is ThreadDeath) throw e
                 if (session.cancelled.get()) {
@@ -993,11 +944,214 @@ object RecognitionController {
                 runCatching { stream?.release() }
                 localWorkerActive.set(false)
                 main.post {
-                    drainPendingModelReloadsIfIdle()
-                    if (preloadPending.get()) preloadModels()
+                    if (!isBusy()) {
+                        drainPendingModelReloadsIfIdle()
+                        if (preloadPending.get()) preloadModels()
+                    }
                 }
             }
         }, "本地语音识别-${session.id}").start()
+    }
+
+    private fun enqueueFinal(job: FinalJob) {
+        val accepted = synchronized(finalQueueLock) {
+            if (finalQueue.size >= MAX_FINAL_QUEUE_SIZE) false
+            else {
+                finalQueue.addLast(job)
+                true
+            }
+        }
+        if (!accepted) {
+            logger.warning(
+                "最终识别队列已满，改为保存实时结果，队列上限=$MAX_FINAL_QUEUE_SIZE",
+                operationId(job.session),
+            )
+            finish(
+                job.session,
+                "最终识别队列已满，已保存实时文字",
+                job.realtime,
+                job.realtime.isNotBlank(),
+            )
+            return
+        }
+
+        main.post {
+            synchronized(stateLock) {
+                if (activeSession === job.session) activeSession = null
+                listening = false
+                currentPhase = "idle"
+                currentStatus = if (processingFinalJob == null) {
+                    "正在生成最终文字，可继续识别"
+                } else {
+                    "已加入最后识别队列，可继续识别"
+                }
+                lastText = job.realtime
+            }
+            listeners.forEach { it.onAudioLevel(0f) }
+            notifyQueueChanged()
+        }
+        logger.info(
+            "录音已加入最终识别队列，等待数量=${synchronized(finalQueueLock) { finalQueue.size }}",
+            operationId(job.session),
+        )
+        startFinalWorker()
+    }
+
+    private fun startFinalWorker() {
+        if (!finalWorkerActive.compareAndSet(false, true)) return
+        Thread({
+            try {
+                while (true) {
+                    val job = synchronized(finalQueueLock) {
+                        if (finalQueue.isEmpty()) null else finalQueue.removeFirst()
+                    } ?: break
+                    processingFinalJob = job
+                    notifyQueueChanged()
+                    processFinal(job)
+                    processingFinalJob = null
+                    notifyQueueChanged()
+                }
+            } finally {
+                processingFinalJob = null
+                finalWorkerActive.set(false)
+                val needsRestart = synchronized(finalQueueLock) { finalQueue.isNotEmpty() }
+                if (needsRestart) {
+                    startFinalWorker()
+                } else {
+                    main.post {
+                        drainPendingModelReloadsIfIdle()
+                        if (preloadPending.get() || activeSession == null) preloadModels()
+                    }
+                }
+            }
+        }, "最终识别队列").start()
+    }
+
+    private fun processFinal(job: FinalJob) {
+        val session = job.session
+        var secondPassFailed = false
+        try {
+            val secondPass = try {
+                when (session.finalModel) {
+                    FINAL_FASTER_WHISPER_SMALL -> {
+                        notifyFinalProgress("正在使用 Faster-Whisper Small 生成最终文字…")
+                        RecognitionText.cleanRealtime(runTranscribeFinal(session, job.wholeAudio))
+                    }
+                    FINAL_QWEN3_ASR_06B_INT8, FINAL_QWEN3_ASR_17B_Q5_K_M -> {
+                        notifyFinalProgress("正在使用最终模型分段整理文字…")
+                        var correctedText = ""
+                        job.correctionSegments.forEachIndexed { index, segment ->
+                            val segmentText = if (session.finalModel == FINAL_QWEN3_ASR_06B_INT8) {
+                                runOfflineCorrection(segment, job.correctionResourceId!!)
+                            } else {
+                                runTranscribeFinal(session, segment)
+                            }
+                            correctedText = RecognitionText.combineSegments(correctedText, segmentText)
+                            logger.info(
+                                "分段最终识别完成，片段=${index + 1}/${job.correctionSegments.size}，样本=${segment.size}，字符数=${segmentText.length}",
+                                operationId(session),
+                            )
+                        }
+                        correctedText
+                    }
+                    else -> ""
+                }
+            } catch (error: Throwable) {
+                if (error is ThreadDeath) throw error
+                secondPassFailed = true
+                logger.error(
+                    "二次识别失败，改用实时识别结果，方式=${session.engine}",
+                    error,
+                    operationId(session),
+                )
+                ""
+            }
+            val final = if (job.useTranscribe) {
+                RecognitionText.chooseWhisperFinal(
+                    realtime = job.realtime,
+                    whisper = secondPass,
+                    audioSampleCount = session.recordedSamples,
+                )
+            } else {
+                RecognitionText.chooseFinal(job.realtime, secondPass)
+            }
+            val finalText = final.text
+            logger.info(
+                "最终结果候选选择完成，来源=${final.source}，实时字符数=${job.realtime.length}，二次识别字符数=${secondPass.length}",
+                operationId(session),
+            )
+            val testCapture = if (session.testModeEnabled) {
+                TestCapture(
+                    realtimeDraft = job.realtime,
+                    secondPassText = secondPass.takeIf { it.isNotBlank() },
+                    selectedResult = if (final.source == RecognitionResultSource.CORRECTED) {
+                        TestSelectedResult.SECOND_PASS
+                    } else {
+                        TestSelectedResult.REALTIME_DRAFT
+                    },
+                    audioSamples = job.wholeAudio,
+                )
+            } else {
+                null
+            }
+            completeFinal(
+                session = session,
+                status = when {
+                    finalText.isBlank() -> "没有识别到文字，请再试一次。"
+                    secondPassFailed -> "二次识别失败，已保留实时结果"
+                    job.useTranscribe && final.source == RecognitionResultSource.REALTIME ->
+                        "最终模型未产生有效结果，已保留实时结果"
+                    final.source == RecognitionResultSource.REALTIME -> "已保留更完整的实时结果"
+                    else -> "最终识别完成"
+                },
+                text = finalText,
+                save = finalText.isNotBlank(),
+                testCapture = testCapture,
+            )
+        } catch (error: Throwable) {
+            if (error is ThreadDeath) throw error
+            logger.error("后台最终识别失败，方式=${session.engine}", error, operationId(session))
+            completeFinal(
+                session = session,
+                status = "最终识别失败，已保留实时文字",
+                text = job.realtime,
+                save = job.realtime.isNotBlank(),
+            )
+        }
+    }
+
+    private fun completeFinal(
+        session: Session,
+        status: String,
+        text: String,
+        save: Boolean,
+        testCapture: TestCapture? = null,
+    ) {
+        if (!session.finished.compareAndSet(false, true)) return
+        saveHistory(session, text, save, testCapture)?.let { throw it }
+        lastFinalText = text
+        main.post {
+            if (activeSession == null) {
+                lastText = text
+                currentPhase = "idle"
+                currentStatus = status
+            }
+            val totalDuration = System.currentTimeMillis() - session.createdAt
+            logger.info(
+                "排队识别会话结束，方式=${session.engine}，总耗时=${totalDuration}毫秒，样本=${session.recordedSamples}，字符数=${text.length}，已保存=$save",
+                operationId(session),
+            )
+            notifyQueueChanged()
+        }
+    }
+
+    private fun notifyFinalProgress(status: String) = main.post {
+        if (activeSession == null) currentStatus = status
+        notifyQueueChanged()
+    }
+
+    private fun notifyQueueChanged() = main.post {
+        listeners.forEach { it.onRecognitionState(listening, currentStatus, lastText) }
     }
 
     private fun runOfflineCorrection(samples: FloatArray, resourceId: String): String {
@@ -1117,29 +1271,7 @@ object RecognitionController {
         runCatching { session.recognizer?.cancel() }
         runCatching { session.recognizer?.destroy() }
         session.recognizer = null
-        var fatalThreadDeath: ThreadDeath? = null
-        if (save && text.isNotBlank()) {
-            try {
-                if (testCapture != null) {
-                    history.addWithTestData(
-                        finalText = text,
-                        engine = session.engine,
-                        realtimeDraft = testCapture.realtimeDraft,
-                        secondPassText = testCapture.secondPassText,
-                        selectedResult = testCapture.selectedResult,
-                        audioSamples = testCapture.audioSamples,
-                    )
-                } else {
-                    history.add(text, session.engine)
-                }
-            } catch (e: Throwable) {
-                if (e is ThreadDeath) {
-                    fatalThreadDeath = e
-                } else {
-                    runCatching { logger.error("保存识别历史失败", e, operationId(session)) }
-                }
-            }
-        }
+        val fatalThreadDeath = saveHistory(session, text, save, testCapture)
         main.post {
             synchronized(stateLock) {
                 if (activeSession !== session) return@post
@@ -1164,4 +1296,38 @@ object RecognitionController {
         }
         fatalThreadDeath?.let { throw it }
     }
+
+    private fun saveHistory(
+        session: Session,
+        text: String,
+        save: Boolean,
+        testCapture: TestCapture?,
+    ): ThreadDeath? {
+        var fatalThreadDeath: ThreadDeath? = null
+        if (save && text.isNotBlank()) {
+            try {
+                if (testCapture != null) {
+                    history.addWithTestData(
+                        finalText = text,
+                        engine = session.engine,
+                        realtimeDraft = testCapture.realtimeDraft,
+                        secondPassText = testCapture.secondPassText,
+                        selectedResult = testCapture.selectedResult,
+                        audioSamples = testCapture.audioSamples,
+                    )
+                } else {
+                    history.add(text, session.engine)
+                }
+            } catch (e: Throwable) {
+                if (e is ThreadDeath) {
+                    fatalThreadDeath = e
+                } else {
+                    runCatching { logger.error("保存识别历史失败", e, operationId(session)) }
+                }
+            }
+        }
+        return fatalThreadDeath
+    }
+
+    private const val MAX_FINAL_QUEUE_SIZE = 8
 }

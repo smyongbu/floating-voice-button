@@ -33,6 +33,9 @@ import androidx.webkit.WebViewAssetLoader
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
@@ -229,7 +232,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
                 put("type", "recognition")
                 put("recognition", recognitionJson())
             })
-            if (!RecognitionController.isListening()) emitHistory()
+            emitHistory()
         }
     }
 
@@ -296,7 +299,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
 
         @JavascriptInterface
         fun setTestModeEnabled(enabled: Boolean) = runOnUiThread {
-            if (RecognitionController.isListening()) {
+            if (RecognitionController.isBusy()) {
                 emitSettings()
                 showMessage("识别结束后再更改测试模式。")
                 return@runOnUiThread
@@ -318,7 +321,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         @JavascriptInterface
         fun setEngine(engine: String) = runOnUiThread {
             if (engine !in RecognitionController.validEngines) return@runOnUiThread
-            if (RecognitionController.isListening()) {
+            if (RecognitionController.isBusy()) {
                 emitSettings()
                 showMessage("识别结束后才能切换方案。")
                 return@runOnUiThread
@@ -332,7 +335,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         @JavascriptInterface
         fun setRealtimeModel(model: String) = runOnUiThread {
             if (model !in RecognitionController.validRealtimeModels) return@runOnUiThread
-            if (RecognitionController.isListening()) {
+            if (RecognitionController.isBusy()) {
                 emitSettings()
                 showMessage("识别结束后才能切换实时显示模型。")
                 return@runOnUiThread
@@ -346,7 +349,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         @JavascriptInterface
         fun setFinalModel(model: String) = runOnUiThread {
             if (model !in RecognitionController.validFinalModels) return@runOnUiThread
-            if (RecognitionController.isListening()) {
+            if (RecognitionController.isBusy()) {
                 emitSettings()
                 showMessage("识别结束后才能切换最终识别模型。")
                 return@runOnUiThread
@@ -465,7 +468,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
 
         @JavascriptInterface
         fun verifyResource(id: String) = runOnUiThread {
-            if (RecognitionController.isListening()) showMessage("识别进行中，暂时不能校验模型。")
+            if (RecognitionController.isBusy()) showMessage("识别或最终识别队列进行中，暂时不能校验模型。")
             else ModelResourceManager.verify(id)
         }
 
@@ -476,8 +479,8 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
 
         @JavascriptInterface
         fun deleteResource(id: String) = runOnUiThread {
-            if (RecognitionController.isListening()) {
-                showMessage("识别进行中，暂时不能删除模型。")
+            if (RecognitionController.isBusy()) {
+                showMessage("识别或最终识别队列进行中，暂时不能删除模型。")
                 return@runOnUiThread
             }
             if (!RecognitionController.unloadModel(id)) {
@@ -764,7 +767,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
     }
 
     private fun diagnosticsText(): String = buildString {
-        appendLine("安卓语音输入诊断信息")
+        appendLine("语点诊断信息")
         appendLine("应用版本：${appVersion()}")
         appendLine("系统：Android ${Build.VERSION.RELEASE}（API ${Build.VERSION.SDK_INT}）")
         appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL}")
@@ -838,6 +841,9 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
             put("phase", state.phase)
             put("status", state.status)
             put("text", state.text)
+            put("finalProcessing", state.finalProcessing)
+            put("finalQueueCount", state.finalQueueCount)
+            put("finalText", state.finalText)
         }
     }
 
@@ -874,6 +880,19 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
                         put("audioBytes", test.audioBytes)
                     })
                 }
+            })
+        }
+        RecognitionController.pendingHistory().forEach { item ->
+            put(JSONObject().apply {
+                put("id", item.id)
+                put("text", item.text)
+                put(
+                    "createdAt",
+                    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
+                        .format(Date(item.createdAt)),
+                )
+                put("engine", item.engine)
+                put("queueStatus", item.queueStatus)
             })
         }
     }

@@ -9,7 +9,10 @@
       capturing: false,
       phase: "idle",
       status: "正在检查本地模型…",
-      text: ""
+      text: "",
+      finalProcessing: false,
+      finalQueueCount: 0,
+      finalText: ""
     },
     settings: {
       engine: "local_dual",
@@ -476,7 +479,7 @@
       }
     }
     return {
-      recognition: { active: false, capturing: false, phase: "idle", status: "实时与最后识别模型已就绪", text: "" },
+      recognition: { active: false, capturing: false, phase: "idle", status: "实时与最后识别模型已就绪", text: "", finalProcessing: false, finalQueueCount: 0, finalText: "" },
       settings: { ...state.settings },
       resources: [
         { id: "streaming-paraformer-bilingual-zh-en", name: "Streaming Paraformer", purpose: "边说边显示中英文识别文字", version: "8e40c432-int8", totalBytes: 237202501, presentBytes: 237202501, installedBytes: 237202501, status: "available", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
@@ -582,10 +585,15 @@
     const phase = recognition.phase || "idle";
     const active = Boolean(recognition.active);
     const capturing = Boolean(recognition.capturing);
-    const text = typeof recognition.text === "string" ? recognition.text : "";
+    const backgroundFinalBusy = Boolean(recognition.finalProcessing) || Number(recognition.finalQueueCount || 0) > 0;
+    const recognitionText = typeof recognition.text === "string" ? recognition.text : "";
+    const finalText = typeof recognition.finalText === "string" ? recognition.finalText : "";
+    const text = active ? recognitionText : recognition.finalProcessing ? finalText : recognitionText;
     const missingRequiredResources = hasMissingRequiredResources();
     elements.statusText.textContent = missingRequiredResources && !active
       ? "需要先下载所需离线模型"
+      : backgroundFinalBusy && !active
+      ? "正在整理上一段文字，可继续识别"
       : recognition.status || "准备就绪";
     elements.statusHint.textContent = {
       preparing: "模型和麦克风准备完成前，请先不要说话",
@@ -596,12 +604,16 @@
     elements.recordButton.dataset.active = String(active);
     elements.recordButton.disabled = (!active && missingRequiredResources) || (active && phase === "processing");
     elements.recordButtonText.textContent = active
-      ? phase === "processing" ? "正在整理文字" : "停止识别"
-      : missingRequiredResources ? "请先下载模型" : "开始识别";
+      ? phase === "processing" ? "正在加入队列" : "停止识别"
+      : missingRequiredResources ? "请先下载模型" : backgroundFinalBusy ? "继续识别" : "开始识别";
     elements.cancelButton.classList.toggle("is-hidden", !active);
     elements.transcriptText.textContent = text || "识别文字会显示在这里";
     elements.transcriptText.classList.toggle("is-placeholder", !text);
-    elements.finalRecognitionStatus.classList.toggle("is-hidden", phase !== "processing");
+    const queueCount = Number(recognition.finalQueueCount || 0);
+    elements.finalRecognitionStatus.textContent = recognition.finalProcessing
+      ? queueCount > 0 ? `最后识别中···　排队 ${queueCount} 条` : "最后识别中···"
+      : queueCount > 0 ? `等待最后识别　${queueCount} 条` : "";
+    elements.finalRecognitionStatus.classList.toggle("is-hidden", !elements.finalRecognitionStatus.textContent);
     if (previousRecognitionActive && !active) {
       elements.recognitionAnnouncement.textContent = text ? "识别完成，文字已保存。" : "本次识别已结束。";
     }
@@ -639,13 +651,14 @@
     const query = state.historyQuery.trim().toLocaleLowerCase("zh-CN");
     pruneHistorySelection();
     const filtered = state.history.filter((item) => String(item.text || "").toLocaleLowerCase("zh-CN").includes(query));
+    const completedFiltered = filtered.filter((item) => !item.queueStatus);
     const ordered = [...filtered].sort((left, right) => historyTimestamp(left) - historyTimestamp(right));
     const visible = ordered.slice(Math.max(0, ordered.length - state.historyVisibleCount));
     elements.historyCount.textContent = `${state.history.length} 条记录 · 最多保存 500 条`;
     elements.historyEmptyTitle.textContent = "识别完成后会出现在这里";
     elements.historyEmptyText.textContent = "最多保存 500 条；本地识别不上传录音，系统识别取决于手机语音服务。";
     elements.clearHistoryButton.disabled = state.history.length === 0;
-    elements.copyAllHistoryButton.disabled = filtered.length === 0;
+    elements.copyAllHistoryButton.disabled = completedFiltered.length === 0;
     const selectionCount = state.selectedHistoryIds.size;
     elements.historySelectionBar.classList.toggle("is-hidden", selectionCount === 0);
     elements.historyList.classList.toggle("is-selection-mode", selectionCount > 0);
@@ -677,6 +690,20 @@
   function createHistoryCard(item) {
     const card = document.createElement("article");
     card.className = "history-card";
+    if (item.queueStatus) {
+      card.classList.add("is-pending");
+      const status = document.createElement("p");
+      status.className = "history-pending-status";
+      status.textContent = item.queueStatus === "processing" ? "最后识别中···" : "排队等待";
+      const text = document.createElement("p");
+      text.className = "history-text";
+      text.textContent = String(item.text || "等待生成最终文字");
+      const meta = document.createElement("p");
+      meta.className = "history-meta";
+      meta.textContent = `${formatDate(item.createdAt)}　${engineName(item.finalEngine || item.engine)}`;
+      card.append(status, text, meta);
+      return card;
+    }
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", "复制这条识别记录");

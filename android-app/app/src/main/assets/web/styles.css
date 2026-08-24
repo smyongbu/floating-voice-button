@@ -864,6 +864,29 @@ button:disabled {
 .history-card.is-selected::before { position: absolute; z-index: 2; top: 19px; right: 20px; display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: var(--color-primary); color: white; content: "✓"; font-size: 0.8rem; font-weight: 800; }
 .history-card:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-primary) 72%, transparent); outline-offset: 3px; }
 
+.history-card.is-pending {
+  min-height: 116px;
+  padding-right: 16px;
+  border-color: color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-raised));
+  cursor: default;
+}
+
+.history-card.is-pending:active { transform: none; }
+
+.history-pending-status {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
+  font-size: 0.75rem;
+  font-weight: 680;
+}
+
 .history-text {
   margin: 0;
   color: var(--color-text);

@@ -93,12 +93,17 @@ jobs:
             echo '错误：安装包中发现模型文件。'
             exit 1
           fi
+      - name: 准备版本化交付文件
+        run: |
+          mkdir -p android-app/发布
+          cp android-app/app/build/outputs/apk/debug/app-debug.apk "android-app/发布/语点-0.13.0-Android-arm64-开发版.apk"
+          cp android-app/app/build/outputs/apk/debug/apk-metadata.txt "android-app/发布/语点-0.13.0-Android-arm64-开发版-校验.txt"
       - name: 保存安卓安装包
         uses: actions/upload-artifact@v4
         with:
-          name: 安卓语音输入-五模型版
+          name: 语点-0.13.0-Android-arm64-开发版
           path: |
-            android-app/app/build/outputs/apk/debug/app-debug.apk
-            android-app/app/build/outputs/apk/debug/apk-metadata.txt
+            android-app/发布/语点-0.13.0-Android-arm64-开发版.apk
+            android-app/发布/语点-0.13.0-Android-arm64-开发版-校验.txt
           if-no-files-found: error
           retention-days: 3
