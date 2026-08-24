@@ -143,6 +143,10 @@ def prepare(package_dir: Path) -> dict:
 
 
 def main() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser()
     parser.add_argument("--package-dir", type=Path, required=True)
     info = prepare(parser.parse_args().package_dir.resolve())
