@@ -4,6 +4,8 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 import urllib.request
@@ -70,6 +72,26 @@ def fetch(models_dir: Path, item: DownloadItem) -> str:
     if valid(target, item):
         return str(item.relative_path)
     part = target.with_name(target.name + ".part")
+    curl = shutil.which("curl.exe") or shutil.which("curl")
+    if curl:
+        part.unlink(missing_ok=True)
+        print(f"下载模型：{item.model_id} / {item.relative_path}", flush=True)
+        subprocess.run([
+            curl, "--location", "--fail", "--silent", "--show-error",
+            "--retry", "10", "--retry-delay", "5", "--retry-all-errors",
+            "--connect-timeout", "30", "--max-time", "3600",
+            "--output", str(part), item.url,
+        ], check=True)
+        if not valid(part, item):
+            actual_size = part.stat().st_size if part.exists() else -1
+            actual_hash = sha256_file(part) if part.exists() else "missing"
+            part.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"模型校验失败：{item.model_id}/{item.relative_path}；"
+                f"实际 {actual_size} 字节、{actual_hash}，期望 {item.size} 字节、{item.sha256}"
+            )
+        os.replace(part, target)
+        return str(item.relative_path)
     for attempt in range(1, 5):
         offset = part.stat().st_size if part.exists() else 0
         request = urllib.request.Request(item.url, headers={"User-Agent": "Yudian-GitHub-Release/0.16.11", "Accept-Encoding": "identity"})
@@ -85,7 +107,7 @@ def fetch(models_dir: Path, item: DownloadItem) -> str:
                 os.replace(part, target)
                 return str(item.relative_path)
             part.unlink(missing_ok=True)
-            raise RuntimeError("大小或 SHA-256 不符")
+            raise RuntimeError(f"模型校验失败：{item.model_id}/{item.relative_path}")
         except Exception:
             if attempt == 4:
                 part.unlink(missing_ok=True)
