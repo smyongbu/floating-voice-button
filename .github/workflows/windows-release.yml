@@ -36,7 +36,7 @@ jobs:
           $lite = Join-Path $PWD "发布版本\语点-Windows-$version-轻量升级版-不带模型.zip"
           if (-not (Test-Path -LiteralPath $lite)) { throw "未找到轻量版：$lite" }
           $info = Get-Content -LiteralPath "dist\语点\build-info.json" -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ($info.appVersion -ne $version.TrimStart('v') -or $info.variant -ne 'full-with-5-models' -or $info.modelCount -ne 5 -or $info.modelFiles.Count -ne 18 -or $info.modelBytes -ne 3287863555) { throw "完整版元数据验收失败" }
+          if ($info.appVersion -ne $version.TrimStart('v') -or $info.variant -ne 'full-with-5-models' -or $info.modelCount -ne 5 -or $info.modelFiles.Count -ne 18 -or $info.modelBytes -ne 3288512563) { throw "完整版元数据验收失败" }
           $exeVersion = (Get-Item -LiteralPath "dist\语点\语点.exe").VersionInfo
           if ($exeVersion.FileVersion -ne $version.TrimStart('v') -or $exeVersion.ProductVersion -ne $version.TrimStart('v')) { throw "EXE 版本号验收失败" }
           $stage = Join-Path $PWD "build\full-release"

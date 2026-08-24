@@ -10,7 +10,7 @@ class FullWindowsReleaseTests(unittest.TestCase):
         plan = download_plan()
         self.assertEqual(5, len(MODEL_DIRECTORIES))
         self.assertEqual(18, len(plan))
-        self.assertEqual(3_287_863_555, sum(item.size for item in plan))
+        self.assertEqual(3_288_512_563, sum(item.size for item in plan))
         self.assertEqual(18, len({str(item.relative_path) for item in plan}))
 
     def test_streaming_package_contains_only_int8_runtime_files(self):

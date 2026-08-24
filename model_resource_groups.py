@@ -53,7 +53,7 @@ MODEL_FILES: dict[str, dict[str, Any]] = {
         "base": "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/2cc50d1abfe4d4f2df8d71f536d108bb40f943d2/",
         "files": {
             "conv_frontend.onnx": (44_148_281, "d22dc4423e0940e49884e903d2ea2f7e5567c14fc1aed97e4e26d6b8f208ef9e", "conv_frontend.onnx"),
-            "decoder.int8.onnx": (755_914_231, "4f6885be5959ae26af3089d38ee7972c5fafbeeb1cf8d5e76eab6d8b61ca5771", "decoder.int8.onnx"),
+            "decoder.int8.onnx": (756_563_239, "61e5f8249f9e7c82d5e01e1938c79fb3f5b3135f91664928033029e42451bd18", "decoder.int8.onnx"),
             "encoder.int8.onnx": (182_491_662, "60748d3e6744a57c9c91e1b17424a6c2990567e8adceb0783940c03ed98fa9d9", "encoder.int8.onnx"),
             "tokenizer/merges.txt": (1_671_853, "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5", "tokenizer/merges.txt"),
             "tokenizer/tokenizer_config.json": (12_487, "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c", "tokenizer/tokenizer_config.json"),
