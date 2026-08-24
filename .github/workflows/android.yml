@@ -8,13 +8,18 @@ on:
       - "android-app/**"
       - ".github/workflows/android.yml"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "已有 GitHub Release 标签；填写后把 APK 直接上传到该 Release"
+        required: false
+        type: string
 
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -99,6 +104,7 @@ jobs:
           cp android-app/app/build/outputs/apk/debug/app-debug.apk "android-app/发布/语点-0.13.0-Android-arm64-开发版.apk"
           cp android-app/app/build/outputs/apk/debug/apk-metadata.txt "android-app/发布/语点-0.13.0-Android-arm64-开发版-校验.txt"
       - name: 保存安卓安装包
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_tag == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: 语点-0.13.0-Android-arm64-开发版
@@ -107,3 +113,15 @@ jobs:
             android-app/发布/语点-0.13.0-Android-arm64-开发版-校验.txt
           if-no-files-found: error
           retention-days: 3
+      - name: 上传安卓安装包到 GitHub Release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+          gh release upload "$RELEASE_TAG" \
+            "android-app/发布/语点-0.13.0-Android-arm64-开发版.apk" \
+            "android-app/发布/语点-0.13.0-Android-arm64-开发版-校验.txt" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
