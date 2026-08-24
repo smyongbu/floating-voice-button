@@ -47,6 +47,14 @@ MODEL_EXTENSIONS = {
 }
 
 
+def configure_console_utf8() -> None:
+    """Keep Chinese build output writable on non-Chinese Windows runners."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def configure_logs() -> tuple[logging.Logger, logging.Logger]:
     log_dir = PROJECT_ROOT / "build" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -371,6 +379,7 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    configure_console_utf8()
     arguments = parse_args()
     built_archive, built_checksum = build(
         arguments.variant,

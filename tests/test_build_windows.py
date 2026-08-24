@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import tempfile
 import xml.etree.ElementTree as ET
@@ -20,6 +21,36 @@ class WindowsBuildTests(unittest.TestCase):
         with patch("sys.argv", ["build_windows.py"]):
             arguments = build_windows.parse_args()
         self.assertFalse(hasattr(arguments, "version"))
+
+    def test_build_console_is_reconfigured_for_chinese_output(self):
+        stdout_buffer = io.BytesIO()
+        stderr_buffer = io.BytesIO()
+        stdout = io.TextIOWrapper(stdout_buffer, encoding="cp1252", errors="strict")
+        stderr = io.TextIOWrapper(stderr_buffer, encoding="cp1252", errors="strict")
+        try:
+            with (
+                patch.object(build_windows.sys, "stdout", stdout),
+                patch.object(build_windows.sys, "stderr", stderr),
+            ):
+                build_windows.configure_console_utf8()
+                print("发布版本\\语点.zip", file=build_windows.sys.stdout)
+                print("编译失败", file=build_windows.sys.stderr)
+                stdout.flush()
+                stderr.flush()
+
+            self.assertEqual(stdout.encoding.lower(), "utf-8")
+            self.assertEqual(stderr.encoding.lower(), "utf-8")
+            self.assertEqual(
+                stdout_buffer.getvalue().decode("utf-8").splitlines(),
+                ["发布版本\\语点.zip"],
+            )
+            self.assertEqual(
+                stderr_buffer.getvalue().decode("utf-8").splitlines(),
+                ["编译失败"],
+            )
+        finally:
+            stdout.detach()
+            stderr.detach()
 
     def test_cloud_workflow_reuses_local_build_entrypoint(self):
         workflow = (
