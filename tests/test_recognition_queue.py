@@ -400,6 +400,75 @@ class RecognitionQueueTests(unittest.TestCase):
         self.assertEqual(instance.batch_results, [])
         self.assertEqual(len(instance.batch_errors), 1)
 
+    def test_visible_realtime_text_overrides_low_level_silence_gate(self):
+        instance = self._instance()
+        router = MagicMock()
+        router.transcribe_pcm16.return_value = _result("")
+        session = MagicMock()
+        session.current_text = "已经显示的低声语音"
+        session.finish.return_value = RealtimeUpdate(
+            "quiet-live", 3, "", "", 1_000, True
+        )
+        session.wait_closed.return_value = True
+        job = self._job(
+            "quiet-live",
+            "batch-quiet-live",
+            pcm=_alternating_pcm(30),
+            router=router,
+            session=session,
+        )
+        instance.pending_history_operations.add(job.operation_id)
+
+        instance._process_recognition_job(job)
+
+        session.finish.assert_called_once_with(timeout=5.0)
+        router.transcribe_pcm16.assert_called_once_with(job.pcm, SAMPLE_RATE)
+        self.assertEqual(instance.batch_errors, [])
+        self.assertEqual(
+            instance.batch_results,
+            [app.RecognitionBatchItem("quiet-live", 456, False, "已经显示的低声语音")],
+        )
+        instance.history_store.complete.assert_called_once_with(
+            "quiet-live", "已经显示的低声语音"
+        )
+
+        instance._ensure_clipboard_text = MagicMock()
+        instance._deliver_recognition_batch(
+            job.batch_id,
+            list(instance.batch_results),
+            list(instance.batch_errors),
+            auto_paste_enabled=False,
+        )
+        instance._warning.assert_not_called()
+        instance._ensure_clipboard_text.assert_called_once_with(
+            "已经显示的低声语音", "quiet-live", "整批识别完成"
+        )
+
+    def test_true_silence_without_realtime_text_stays_on_fast_path(self):
+        instance = self._instance()
+        router = MagicMock()
+        session = MagicMock()
+        session.current_text = ""
+        session.wait_closed.return_value = False
+        job = self._job(
+            "true-silence",
+            "batch-true-silence",
+            pcm=bytes(SAMPLE_RATE * 2),
+            router=router,
+            session=session,
+        )
+
+        instance._process_recognition_job(job)
+
+        session.finish.assert_not_called()
+        session.cancel.assert_called_once_with()
+        router.transcribe_pcm16.assert_not_called()
+        self.assertEqual(instance.batch_results, [])
+        self.assertEqual(
+            instance.batch_errors,
+            [("true-silence", "没有检测到有效声音")],
+        )
+
     def test_batch_waits_while_recording_or_recording_start_is_busy(self):
         for state_name in ("recording", "busy"):
             with self.subTest(state=state_name):

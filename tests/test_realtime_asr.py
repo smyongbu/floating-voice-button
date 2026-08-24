@@ -48,6 +48,12 @@ class _FakeRecognizer:
         return None
 
 
+class _EmptyFinalRecognizer(_FakeRecognizer):
+    @staticmethod
+    def get_result(stream):
+        return "" if stream.finished else "实时识别到了"
+
+
 class _EndpointStream(_FakeStream):
     def __init__(self):
         super().__init__()
@@ -266,6 +272,21 @@ class RealtimeAsrTests(unittest.TestCase):
         self.assertEqual(result.segment_start_ms, 0)
         self.assertEqual(result.segment_end_ms, 100)
         self.assertTrue(any(item.partial_text == "你好" for item in updates))
+
+    def test_finish_keeps_last_nonempty_partial_when_final_decode_is_empty(self):
+        updates = []
+        session = realtime_asr.RealtimeSession(
+            "empty-final", _EmptyFinalRecognizer(), updates.append
+        )
+        session.start()
+        self.assertTrue(session.feed_pcm16(bytes(3200), 16000))
+
+        result = session.finish(timeout=2.0)
+
+        self.assertTrue(result.is_final)
+        self.assertEqual(result.text, "实时识别到了")
+        self.assertEqual(session.current_text, "实时识别到了")
+        self.assertEqual(updates[-1].text, "实时识别到了")
 
     def test_endpoint_update_exposes_only_the_independent_segment(self):
         updates = []

@@ -1150,8 +1150,8 @@ function formatDate(value, includeYear = true) {
     return String(value || "时间未知");
   }
   const options = includeYear
-    ? { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }
-    : { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" };
+    ? { year: "numeric", month: "long", day: "numeric" }
+    : { year: "2-digit", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" };
   return new Intl.DateTimeFormat("zh-CN", options).format(date);
 }
 
@@ -1172,9 +1172,8 @@ function renderDetail() {
   const statusLabel = entry?.status === "recognizing"
     ? "正在识别"
     : (entry?.status === "queued" ? `排队第 ${entry.queue_position} 位` : "");
-  elements.detailTime.textContent = hasEntry
-    ? `${formatDate(entry.created_at, true)}${statusLabel ? ` · ${statusLabel}` : ""}`
-    : "选择一条记录查看全文";
+  elements.detailTime.hidden = hasEntry && !statusLabel;
+  elements.detailTime.textContent = hasEntry ? statusLabel : "选择一条记录查看全文";
   if (!entry) {
     return;
   }
@@ -1211,16 +1210,17 @@ function renderHistory() {
     text.textContent = entry.status === "recognizing"
       ? `${entry.partial_text || "正在识别…"}▍`
       : previewText(entry.text);
-    const status = createTextElement(
+    const status = entry.status === "completed" ? null : createTextElement(
       "span", `history-status is-${entry.status}`,
       entry.status === "recognizing"
         ? "识别中"
-        : (entry.status === "queued" ? `排队 ${entry.queue_position}` : (entry.status === "failed" ? "失败" : "已完成")),
+        : (entry.status === "queued" ? `排队 ${entry.queue_position}` : "失败"),
     );
     const time = document.createElement("time");
     time.dateTime = entry.created_at;
     time.textContent = formatDate(entry.created_at, false);
     if (entry.status === "queued") button.append(status, time);
+    else if (entry.status === "completed") button.append(text, time);
     else button.append(text, status, time);
     button.addEventListener("click", () => selectEntry(entry.id));
     button.addEventListener("dblclick", () => copyEntry(entry.id));

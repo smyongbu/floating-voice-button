@@ -488,12 +488,19 @@ class RealtimeSession:
         self._decode_lock = decode_lock
         self._segment_start_sample = 0
         self._last_partial = ""
+        self._last_visible_text = ""
         self._final_text = ""
         self._final_update: RealtimeUpdate | None = None
 
     @property
     def overloaded(self) -> bool:
         return self._overloaded
+
+    @property
+    def current_text(self) -> str:
+        """返回已经向界面展示过的最后一份非空实时文字。"""
+        with self._lock:
+            return self._last_visible_text
 
     def wait_closed(self, timeout: float = 0.75) -> bool:
         """等待解码线程完全退出，供会话切换时避免共享模型并发。"""
@@ -541,39 +548,57 @@ class RealtimeSession:
     ) -> None:
         normalized = str(partial or "").strip()
         normalized_endpoint = str(endpoint_text or "").strip()
-        if (
-            not final
-            and not endpoint_reached
-            and normalized == self._last_partial
-        ):
-            return
-        self._last_partial = normalized
-        self._revision += 1
-        start_sample = (
-            self._segment_start_sample
-            if segment_start_sample is None
-            else max(0, int(segment_start_sample))
-        )
-        end_sample = (
-            self._audio_samples
-            if segment_end_sample is None
-            else max(start_sample, int(segment_end_sample))
-        )
-        update = RealtimeUpdate(
-            operation_id=self.operation_id,
-            revision=self._revision,
-            stable_text="".join(self._stable_segments),
-            partial_text=normalized,
-            audio_ms=round(self._audio_samples / 16000 * 1000),
-            is_final=final,
-            endpoint_text=normalized_endpoint,
-            segment_start_ms=round(start_sample / 16000 * 1000),
-            segment_end_ms=round(end_sample / 16000 * 1000),
-            endpoint_reached=bool(endpoint_reached),
-        )
-        if final:
-            self._final_text = update.text
-            self._final_update = update
+        with self._lock:
+            if (
+                not final
+                and not endpoint_reached
+                and normalized == self._last_partial
+            ):
+                return
+            self._last_partial = normalized
+            self._revision += 1
+            start_sample = (
+                self._segment_start_sample
+                if segment_start_sample is None
+                else max(0, int(segment_start_sample))
+            )
+            end_sample = (
+                self._audio_samples
+                if segment_end_sample is None
+                else max(start_sample, int(segment_end_sample))
+            )
+            update = RealtimeUpdate(
+                operation_id=self.operation_id,
+                revision=self._revision,
+                stable_text="".join(self._stable_segments),
+                partial_text=normalized,
+                audio_ms=round(self._audio_samples / 16000 * 1000),
+                is_final=final,
+                endpoint_text=normalized_endpoint,
+                segment_start_ms=round(start_sample / 16000 * 1000),
+                segment_end_ms=round(end_sample / 16000 * 1000),
+                endpoint_reached=bool(endpoint_reached),
+            )
+            visible_text = update.text
+            if final and not visible_text and self._last_visible_text:
+                update = RealtimeUpdate(
+                    operation_id=self.operation_id,
+                    revision=self._revision,
+                    stable_text=self._last_visible_text,
+                    partial_text="",
+                    audio_ms=round(self._audio_samples / 16000 * 1000),
+                    is_final=True,
+                    endpoint_text=normalized_endpoint,
+                    segment_start_ms=round(start_sample / 16000 * 1000),
+                    segment_end_ms=round(end_sample / 16000 * 1000),
+                    endpoint_reached=bool(endpoint_reached),
+                )
+                visible_text = update.text
+            if visible_text:
+                self._last_visible_text = visible_text
+            if final:
+                self._final_text = visible_text
+                self._final_update = update
         try:
             self._on_update(update)
         except Exception:

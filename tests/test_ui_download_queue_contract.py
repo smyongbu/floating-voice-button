@@ -108,6 +108,38 @@ class DownloadUiContractTests(unittest.TestCase):
         self.assertGreaterEqual(card_height, button_height * 2 + gap)
 
 
+class HistoryUiContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.javascript = (PROJECT_DIR / "web" / "app.js").read_text(encoding="utf-8")
+
+    def test_completed_history_item_has_no_completed_status_label(self) -> None:
+        render = _top_level_function(self.javascript, "function renderHistory()")
+        self.assertIn(
+            'const status = entry.status === "completed" ? null', render
+        )
+        self.assertIn(
+            'else if (entry.status === "completed") button.append(text, time);',
+            render,
+        )
+        self.assertNotIn('"已完成"', render)
+
+    def test_history_list_time_includes_two_digit_year(self) -> None:
+        formatter = _top_level_function(self.javascript, "function formatDate(value, includeYear = true)")
+        self.assertIn('year: "2-digit"', formatter)
+
+    def test_history_detail_hides_completed_time_and_only_shows_active_status(self) -> None:
+        detail = _top_level_function(self.javascript, "function renderDetail()")
+        self.assertNotIn("formatDate(", detail)
+        self.assertIn(
+            "elements.detailTime.hidden = hasEntry && !statusLabel;", detail
+        )
+        self.assertIn(
+            'elements.detailTime.textContent = hasEntry ? statusLabel : "选择一条记录查看全文";',
+            detail,
+        )
+
+
 class SettingsApiContractTests(unittest.TestCase):
     @staticmethod
     def _api() -> WebSettingsApi:

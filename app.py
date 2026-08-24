@@ -1308,7 +1308,7 @@ class VoiceButtonApp:
 
     def _process_recognition_job(self, job: RecognitionJob) -> None:
         started = time.monotonic()
-        live_result = None
+        live_text = ""
         try:
             if self.closed or self.stop_event.is_set():
                 return
@@ -1322,7 +1322,12 @@ class VoiceButtonApp:
             )
             if len(job.pcm) < job.sample_rate // 2:
                 raise RuntimeError("录音时间太短，请重新录制。")
-            if not has_effective_pcm16_audio(job.pcm, job.sample_rate):
+            if job.session is not None:
+                current_text = getattr(job.session, "current_text", "")
+                if isinstance(current_text, str):
+                    live_text = current_text.strip()
+            effective_audio = has_effective_pcm16_audio(job.pcm, job.sample_rate)
+            if not effective_audio and not live_text:
                 if self.closed or self.stop_event.is_set():
                     return
                 self._safe_history_update(
@@ -1336,16 +1341,24 @@ class VoiceButtonApp:
                 with self.recognition_condition:
                     self.batch_errors.append((job.operation_id, "没有检测到有效声音"))
                 return
+            if not effective_audio:
+                self.run_log.info(
+                    "操作进度 | 编号=%s | 阶段=实时文字否决静音快判 | 字符数=%d",
+                    job.operation_id, len(live_text),
+                )
             if job.session is not None:
                 try:
                     live_result = job.session.finish(timeout=5.0)
-                    if live_result.text:
+                    finished_text = str(live_result.text or "").strip()
+                    if finished_text:
+                        live_text = finished_text
+                    if live_text:
                         self._safe_history_update(
                             "保存实时结果",
                             job.operation_id,
                             "mark_recognizing",
                             job.operation_id,
-                            live_result.text,
+                            live_text,
                         )
                 except Exception as realtime_exc:
                     self.error_log.warning(
@@ -1361,12 +1374,12 @@ class VoiceButtonApp:
             if self.closed or self.stop_event.is_set():
                 return
             text = result.text
-            if live_result is not None and live_result.text:
-                selected = choose_final_recognition(live_result.text, text)
+            if live_text:
+                selected = choose_final_recognition(live_text, text)
                 text = selected.text
                 self.run_log.info(
                     "操作进度 | 编号=%s | 阶段=实时与最终结果择优 | 来源=%s | 实时字符数=%d | 最终字符数=%d",
-                    job.operation_id, selected.source, len(live_result.text), len(result.text),
+                    job.operation_id, selected.source, len(live_text), len(result.text),
                 )
             text = str(text or "").strip()
             if not text:
