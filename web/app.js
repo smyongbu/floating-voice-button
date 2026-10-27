@@ -8,12 +8,10 @@ const previewApi = {
   async get_initial_state() {
     const modelDetails = [
       [486000000, "4 核 64 位 CPU、4 GB 内存", "6 至 8 核 CPU、8 GB 内存", "CPU 可用；GPU 需要 NVIDIA CUDA 12 和 cuDNN 9"],
-      [982000000, "4 核 64 位 CPU、8 GB 内存", "6 核以上 CPU、16 GB 内存", "不需要显卡；NVIDIA CUDA 可选"],
       [1517290464, "4 核 64 位 CPU、12 GB 内存", "8 核 CPU、16 GB 内存，或支持 Vulkan 的显卡", "支持 Intel、AMD、NVIDIA Vulkan；不可用时回退 CPU"],
     ];
     const localModels = [
       ["faster-whisper-small", "Faster-Whisper Small", "多语言自动检测，并支持时间戳"],
-      ["qwen3-asr-0.6b-int8", "Qwen3-ASR 0.6B INT8", "兼顾多种语言、中文方言、歌词和说唱"],
       ["qwen3-asr-1.7b-q5km", "Qwen3-ASR 1.7B Q5_K_M", "识别能力更强，可自动检测 30 种语言"],
     ].map(([model_id, name, summary], index) => {
       const [size_bytes, minimum, recommended, gpu] = modelDetails[index];
@@ -52,7 +50,7 @@ const previewApi = {
         },
         history: { available: true, entries: [], signature: [0, 0], pending_count: 0 },
         model: {
-          engine_id: "local:qwen3-asr-1.7b-q5km", fallback_model: "faster-whisper-small",
+          engine_id: "local:qwen3-asr-1.7b-q5km",
           preference: "auto", realtime_model: previewRealtimeModel,
           realtime_models: [
             {
@@ -60,13 +58,8 @@ const previewApi = {
               name: "Streaming Paraformer",
               available: true,
             },
-            {
-              model_id: "zipformer-bilingual-zh-en-exp32-int8",
-              name: "Zipformer",
-              available: true,
-            },
           ],
-          local_models: localModels, providers: [],
+          local_models: localModels,
         },
       },
     };
@@ -85,12 +78,11 @@ const previewApi = {
     const response = await this.get_initial_state();
     return { ok: true, data: response.data.model, message: "模型状态已更新。" };
   },
-  async save_recognition_settings(engineId, fallbackModel, preference, realtimeModel) {
+  async save_recognition_settings(engineId, preference, realtimeModel) {
     previewRealtimeModel = realtimeModel;
     const response = await this.get_initial_state();
     Object.assign(response.data.model, {
       engine_id: engineId,
-      fallback_model: fallbackModel,
       preference,
       realtime_model: realtimeModel,
     });
@@ -114,16 +106,13 @@ const state = {
     engine_id: "local:faster-whisper-small",
     realtime_model: DEFAULT_REALTIME_MODEL,
     realtime_models: [],
-    fallback_model: "faster-whisper-small",
     preference: "auto",
     local_models: [],
-    providers: [],
   },
   modelBusy: false,
   testBusy: false,
   controlTestActive: false,
   localEngineId: null,
-  onlineEngineId: null,
   entries: [],
   selectedId: null,
   signature: [0, 0],
@@ -151,7 +140,7 @@ let recordingMotionQuery = null;
 
 function collectElements() {
   const ids = [
-    "appearanceView", "localModelView", "onlineModelView", "historyView", "saveState", "colorPicker", "colorText",
+    "appearanceView", "localModelView", "historyView", "saveState", "colorPicker", "colorText",
     "colorError", "opacityRange", "opacityOutput", "sizeRange", "sizeOutput", "hotkeyInput", "hotkeyError",
     "hotkeyTestButton", "hotkeyStatus", "standbyToggle", "transcriptToggle", "autoPasteToggle",
     "standbyConfidence", "standbyConfidenceValue", "controlWordTestButton", "controlWordTestStatus",
@@ -161,11 +150,11 @@ function collectElements() {
     "detailPlaceholder", "detailContent", "detailTime", "detailText",
     "deleteButton", "copyButton", "confirmModal", "modalTitle", "modalMessage",
     "modalCancel", "modalConfirm", "toast", "toastMessage", "bootScreen",
-    "localModelState", "onlineModelState", "localEngineOptions", "onlineEngineOptions",
+    "localModelState", "localEngineOptions",
     "realtimeModelOptions", "sidebarPrivacyText",
-    "localModelList", "deviceOptions", "fallbackModel",
-    "providerList", "modelTestStatus", "localModelSaveButton", "onlineModelSaveButton",
-    "localRecognitionSummary", "onlineRecognitionSummary", "recordingLayeredWave",
+    "localModelList", "deviceOptions",
+    "modelTestStatus", "localModelSaveButton",
+    "localRecognitionSummary", "recordingLayeredWave",
   ];
   for (const id of ids) {
     elements[id] = document.getElementById(id);
@@ -294,7 +283,6 @@ function hideBootScreen() {
 
 function currentView() {
   if (!elements.historyView.hidden) return "history";
-  if (!elements.onlineModelView.hidden) return "onlineModel";
   if (!elements.localModelView.hidden) return "localModel";
   return "appearance";
 }
@@ -328,18 +316,21 @@ function buildRecordingPreviewPath(points) {
 function renderRecordingPreviewWave() {
   const container = elements.recordingLayeredWave;
   if (!container) return;
-  const amplitude = 2 + 0.42 * 18.5;
+  const amplitude = .65;
+  const energy = amplitude * (.65 + .35 * Math.sin(recordingPreviewPhase * .7) ** 2);
   const layers = [
-    [".preview-layered-wave-path-back", amplitude * 0.43, 2.9, -recordingPreviewPhase * 0.82],
-    [".preview-layered-wave-path-middle", amplitude * 0.68, 1.82, recordingPreviewPhase * 0.64 + 0.7],
-    [".preview-layered-wave-path-front", amplitude, 2.25, recordingPreviewPhase],
+    [".preview-layered-wave-path-back", .72, .8, -recordingPreviewPhase*.7],
+    [".preview-layered-wave-path-middle", .88, 1, recordingPreviewPhase*.85+.8],
+    [".preview-layered-wave-path-front", 1, 1.2, recordingPreviewPhase],
   ];
-  for (const [selector, layerAmplitude, cycles, phase] of layers) {
-    const path = container.querySelector(selector);
-    path?.setAttribute("d", buildRecordingPreviewPath(
-      buildRecordingPreviewPoints(120, 36, layerAmplitude, cycles, phase),
-    ));
-  }
+  layers.forEach(([selector, height, cycles, phase], layer) => {
+    const points = Array.from({length:49}, (_,i) => {
+      const t=i/48;
+      const wave=Math.sin(t*Math.PI*2*cycles+phase)+Math.sin(t*Math.PI*2*cycles*1.8-phase*.4)*.12;
+      return {x:12+t*76,y:50+(wave*energy*27*height+(layer-1)*7*amplitude)*Math.sin(Math.PI*t)**1.5};
+    });
+    container.querySelector(selector)?.setAttribute("d", buildRecordingPreviewPath(points));
+  });
 }
 
 function tickRecordingPreview(time) {
@@ -391,8 +382,8 @@ function initializeRecordingPreviewMotion() {
 }
 
 function switchView(view, focusSearch = false) {
-  const next = ["appearance", "localModel", "onlineModel", "history"].includes(view) ? view : "appearance";
-  for (const name of ["appearance", "localModel", "onlineModel", "history"]) {
+  const next = ["appearance", "localModel", "history"].includes(view) ? view : "appearance";
+  for (const name of ["appearance", "localModel", "history"]) {
     const target = elements[`${name}View`];
     const active = name === next;
     target.hidden = !active;
@@ -405,7 +396,6 @@ function switchView(view, focusSearch = false) {
   }
   const privacyCopy = {
     localModel: "本地模式不会上传录音",
-    onlineModel: "在线识别会将录音上传至所选服务",
   };
   elements.sidebarPrivacyText.textContent = privacyCopy[next] || "设置与历史记录仅保存在本机";
   if (next === "history" && focusSearch) {
@@ -443,17 +433,11 @@ function formatSpeed(bytesPerSecond) {
 
 function syncModelControls(payload = state.model) {
   const localDraft = state.localEngineId;
-  const onlineDraft = state.onlineEngineId;
   state.model = { ...state.model, ...(payload || {}) };
   if (localDraft) {
     state.localEngineId = localDraft;
   } else if (state.model.engine_id?.startsWith("local:")) {
     state.localEngineId = state.model.engine_id;
-  }
-  if (onlineDraft) {
-    state.onlineEngineId = onlineDraft;
-  } else if (state.model.engine_id?.startsWith("cloud:")) {
-    state.onlineEngineId = state.model.engine_id;
   }
   const realtimeModel = String(state.model.realtime_model || DEFAULT_REALTIME_MODEL);
   const realtimeStatuses = new Map(
@@ -501,19 +485,9 @@ function syncModelControls(payload = state.model) {
   if (realtimeInput && !realtimeInput.disabled) realtimeInput.checked = true;
   renderEngineOptions();
   renderLocalModels();
-  renderProviders();
   const selected = state.model.preference || "auto";
   const radio = elements.deviceOptions.querySelector(`input[value="${selected}"]`);
   if (radio) radio.checked = true;
-  elements.fallbackModel.replaceChildren();
-  for (const model of state.model.local_models || []) {
-    if (!model.available) continue;
-    const option = document.createElement("option");
-    option.value = model.model_id;
-    option.textContent = model.name;
-    elements.fallbackModel.append(option);
-  }
-  elements.fallbackModel.value = state.model.fallback_model || "faster-whisper-small";
   updateRecognitionSummary();
   elements.modelTestStatus.textContent = state.model.device_error || "";
   elements.modelTestStatus.classList.toggle("is-error", Boolean(state.model.device_error));
@@ -529,9 +503,7 @@ function createTextElement(tag, className, text) {
 
 function renderEngineOptions() {
   elements.localEngineOptions.replaceChildren();
-  elements.onlineEngineOptions.replaceChildren();
   const localEngines = [];
-  const onlineEngines = [];
   for (const model of state.model.local_models || []) {
     const resourceReady = model.resource_status?.state === "completed"
       && model.resource_status?.verified === true;
@@ -550,25 +522,11 @@ function renderEngineOptions() {
       ),
     });
   }
-  for (const provider of state.model.providers || []) {
-    onlineEngines.push({
-      id: `cloud:${provider.provider_id}`,
-      name: provider.name,
-      description: provider.short_description || "在线语音识别",
-      status: provider.configured ? "凭据已保存" : "需要填写凭据",
-      disabled: !provider.configured,
-    });
-  }
   const firstLocal = localEngines.find((engine) => !engine.disabled)?.id || null;
-  const firstOnline = onlineEngines.find((engine) => !engine.disabled)?.id || null;
   if (!localEngines.some((engine) => engine.id === state.localEngineId && !engine.disabled)) {
     state.localEngineId = firstLocal;
   }
-  if (!onlineEngines.some((engine) => engine.id === state.onlineEngineId && !engine.disabled)) {
-    state.onlineEngineId = firstOnline;
-  }
   renderEngineGroup(elements.localEngineOptions, localEngines, "localRecognitionEngine", "localEngineId");
-  renderEngineGroup(elements.onlineEngineOptions, onlineEngines, "onlineRecognitionEngine", "onlineEngineId");
 }
 
 function renderEngineGroup(container, engines, inputName, stateKey) {
@@ -768,67 +726,7 @@ function confirmModelResourceDelete(model) {
   });
 }
 
-function renderProviders() {
-  elements.providerList.replaceChildren();
-  for (const provider of state.model.providers || []) {
-    const card = document.createElement("article");
-    card.className = "provider-card";
-    card.dataset.providerId = provider.provider_id;
-    const header = document.createElement("div");
-    header.className = "provider-header";
-    const title = document.createElement("div");
-    title.className = "provider-title";
-    title.append(createTextElement("b", "", provider.name),
-      createTextElement("span", "", provider.configured ? "凭据已保存在本机" : "尚未配置"));
-    const description = createTextElement("div", "provider-description", provider.description || provider.short_description);
-    const actions = document.createElement("div");
-    actions.className = "provider-actions";
-    const configure = createTextElement("button", "button button-secondary", provider.configured ? "更新凭据" : "填写凭据");
-    configure.type = "button";
-    actions.append(configure);
-    if (provider.configured) {
-      const remove = createTextElement("button", "button button-danger-ghost", "删除凭据");
-      remove.type = "button";
-      remove.addEventListener("click", () => deleteProviderCredentials(provider.provider_id));
-      actions.append(remove);
-    }
-    const form = document.createElement("form");
-    form.className = "provider-form";
-    form.hidden = true;
-    for (const field of provider.fields || []) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "credential-field";
-      const label = createTextElement("label", "", field.label);
-      const input = document.createElement("input");
-      input.name = field.name;
-      input.type = field.secret ? "password" : "text";
-      input.maxLength = Number(field.max_length || 256);
-      input.autocomplete = "off";
-      input.placeholder = provider.configured ? "留空则保持原值" : `请输入${field.label}`;
-      label.htmlFor = `credential-${provider.provider_id}-${field.name}`;
-      input.id = label.htmlFor;
-      wrapper.append(label, input);
-      form.append(wrapper);
-    }
-    const formActions = document.createElement("div");
-    formActions.className = "provider-form-actions";
-    const cancel = createTextElement("button", "button button-secondary", "取消");
-    cancel.type = "button";
-    const save = createTextElement("button", "button button-primary", "保存到本机");
-    save.type = "submit";
-    formActions.append(cancel, save);
-    form.append(formActions);
-    configure.addEventListener("click", () => { form.hidden = !form.hidden; });
-    cancel.addEventListener("click", () => { form.hidden = true; form.reset(); });
-    form.addEventListener("submit", (event) => saveProviderCredentials(event, provider));
-    header.append(title, description, actions);
-    card.append(header, form);
-    elements.providerList.append(card);
-  }
-}
-
 function selectedEngineId(view = currentView()) {
-  if (view === "onlineModel") return state.onlineEngineId || state.model.engine_id;
   if (view === "localModel") {
     return state.localEngineId || state.model.engine_id;
   }
@@ -846,7 +744,6 @@ function selectedRealtimeModelName() {
   return (state.model.realtime_models || []).find((item) => item.model_id === modelId)?.name
     || ({
       "streaming-paraformer-bilingual-zh-en": "Streaming Paraformer",
-      "zipformer-bilingual-zh-en-exp32-int8": "Zipformer",
     })[modelId]
     || modelId;
 }
@@ -858,13 +755,6 @@ function selectedLocalModelName() {
     || modelId;
 }
 
-function selectedOnlineProviderName() {
-  const engineId = selectedEngineId("onlineModel");
-  const providerId = String(engineId || "").replace(/^cloud:/, "");
-  return (state.model.providers || []).find((item) => item.provider_id === providerId)?.name
-    || "所选在线服务";
-}
-
 function updateRecognitionSummary() {
   const realtimeName = selectedRealtimeModelName();
   const deviceName = {
@@ -873,11 +763,8 @@ function updateRecognitionSummary() {
     gpu: "使用显卡",
   }[selectedModelDevice()] || "自动选择";
   elements.localRecognitionSummary.textContent = `当前选择：${realtimeName}；${selectedLocalModelName()}；${deviceName}`;
-  elements.onlineRecognitionSummary.textContent = `实时：${realtimeName}；最终：${selectedOnlineProviderName()}；不做文字校正，完整录音会上传。`;
   elements.localModelState.classList.toggle("is-dirty", false);
-  elements.onlineModelState.classList.toggle("is-dirty", false);
   elements.localModelState.lastChild.textContent = state.model.engine_id?.startsWith("local:") ? "正在使用" : "可以切换";
-  elements.onlineModelState.lastChild.textContent = state.model.engine_id?.startsWith("cloud:") ? "正在使用" : "可以切换";
 }
 
 function selectedModelDevice() {
@@ -888,12 +775,10 @@ async function saveModelSettings(targetView) {
   if (state.modelBusy) return;
   state.modelBusy = true;
   elements.localModelSaveButton.disabled = true;
-  elements.onlineModelSaveButton.disabled = true;
   try {
     const response = await callApi(
       "save_recognition_settings",
       selectedEngineId(targetView),
-      elements.fallbackModel.value,
       selectedModelDevice(),
       selectedRealtimeModel(),
     );
@@ -904,7 +789,6 @@ async function saveModelSettings(targetView) {
   } finally {
     state.modelBusy = false;
     elements.localModelSaveButton.disabled = false;
-    elements.onlineModelSaveButton.disabled = false;
   }
 }
 
@@ -936,39 +820,6 @@ async function testLocalModel(modelId) {
     state.testBusy = false;
     elements.controlWordTestButton.disabled = state.model.voice_test_active === true;
     renderLocalModels();
-  }
-}
-
-async function saveProviderCredentials(event, provider) {
-  event.preventDefault();
-  if (state.modelBusy) return;
-  const values = {};
-  for (const field of provider.fields || []) {
-    values[field.name] = String(event.currentTarget.elements[field.name]?.value || "").trim();
-  }
-  state.modelBusy = true;
-  try {
-    const response = await callApi("save_provider_credentials", provider.provider_id, values);
-    syncModelControls(response.data);
-    showToast(response.message || "在线服务凭据已保存到本机。");
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    state.modelBusy = false;
-  }
-}
-
-async function deleteProviderCredentials(providerId) {
-  if (state.modelBusy) return;
-  state.modelBusy = true;
-  try {
-    const response = await callApi("delete_provider_credentials", providerId);
-    syncModelControls(response.data);
-    showToast(response.message || "在线服务凭据已删除。");
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    state.modelBusy = false;
   }
 }
 
@@ -1563,7 +1414,6 @@ function bindEvents() {
   });
   elements.saveButton.addEventListener("click", saveAppearance);
   elements.localModelSaveButton.addEventListener("click", () => saveModelSettings("localModel"));
-  elements.onlineModelSaveButton.addEventListener("click", () => saveModelSettings("onlineModel"));
   elements.realtimeModelOptions.addEventListener("change", updateRecognitionSummary);
   elements.deviceOptions.addEventListener("change", updateRecognitionSummary);
 
@@ -1670,3 +1520,20 @@ if (typeof getLocalApi()?.get_initial_state === "function") {
   initializeBridge();
 }
 window.setInterval(advanceRecognizingHistoryText, 160);
+
+function initializeWindowControls() {
+  const api = PREVIEW_MODE ? null : window.pywebview?.api;
+  document.querySelectorAll('[data-window-action]').forEach(button => {
+    button.disabled = typeof api?.window_action !== 'function';
+    if (button.dataset.bound) return;
+    button.dataset.bound = 'true';
+    button.addEventListener('click', async () => {
+      try {
+        const response = await window.pywebview.api.window_action(button.dataset.windowAction);
+        if (!response?.ok) showToast(response?.error || '窗口操作失败', true);
+      } catch (_) { showToast('窗口操作失败，请重试', true); }
+    });
+  });
+}
+window.addEventListener('pywebviewready', initializeWindowControls);
+initializeWindowControls();

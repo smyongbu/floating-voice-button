@@ -276,12 +276,11 @@ class LocalFlowTests(unittest.TestCase):
             (bytes(32000), 16000),
             (b"", 16000),
         ]
-        instance.recognition_router = MagicMock(engine_id="cloud:aliyun")
+        instance.recognition_router = MagicMock(engine_id="local:faster-whisper-small")
         instance.recognition_router.transcribe_pcm16.return_value = RecognitionResult(
             text="统一路由识别文字",
-            requested_engine="cloud:aliyun",
-            actual_engine="local:sensevoice-small-int8",
-            fallback_used=True,
+            requested_engine="local:faster-whisper-small",
+            actual_engine="local:faster-whisper-small",
             device_label="CPU",
         )
         with (

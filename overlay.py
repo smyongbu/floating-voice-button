@@ -450,6 +450,32 @@ def render_glass_button_base(
     return Image.alpha_composite(halo, Image.alpha_composite(sphere, inner))
 
 
+def render_deep_button_base(size: int, color: str) -> Image.Image:
+    """深海款：不透明主圆、左上蓝色高光及右下深色渐变。"""
+    if size <= 0:
+        raise ValueError("按钮尺寸必须大于零。")
+    theme = rgb_from_hex(color)
+    scale = 4
+    image = Image.new("RGBA", (size * scale, size * scale))
+    pixels = image.load()
+    n = size * scale
+    for y in range(n):
+        v = (y + .5) / n
+        for x in range(n):
+            u = (x + .5) / n
+            if math.hypot(u - .5, v - .5) > .5:
+                continue
+            shade = max(0.0, min(1.0, (u * .574 + v * .819) / 1.393)) * .533
+            base = _mix_rgb(theme, (3, 21, 44), shade)
+            distance = math.hypot((u - .28) / .72, (v - .15) / .85)
+            highlight = max(0.0, 1.0 - distance / .55) * .6
+            base = _mix_rgb(base, (88, 173, 255), highlight)
+            rim = max(0.0, 1.0 - abs(math.hypot(u-.5, v-.5)-.496) * n)
+            base = _mix_rgb(base, (183, 221, 255), rim * .35 * (1-v))
+            pixels[x, y] = (*base, 255)
+    return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
 def render_recording_halo(size: int) -> Image.Image:
     """绘制限制在固定窗口画布内的录音呼吸光环。"""
     oversample = 3
@@ -647,72 +673,39 @@ def render_waveform_layer(
         raise ValueError("按钮尺寸必须大于零。")
     shape_mix = max(0.0, min(1.0, float(shape_mix)))
     levels = _normalized_levels(levels)
-    oversample = 4
-    layer = Image.new("RGBA", (size * oversample, size * oversample), (0, 0, 0, 0))
-    back = _interpolate_points(
-        _standby_line_points(size),
-        _wave_points(size, levels, 0.43, 2.9, -phase * 0.82),
-        shape_mix,
-    )
-    middle = _interpolate_points(
-        _standby_arc_points(size, True),
-        _wave_points(size, levels, 0.68, 1.82, phase * 0.64 + 0.7),
-        shape_mix,
-    )
-    front = _interpolate_points(
-        _standby_arc_points(size, False),
-        _wave_points(size, levels, 1.0, 2.25, phase),
-        shape_mix,
-    )
-    back_colors = (
-        (0.0, (219, 234, 254, 0)),
-        (0.22, (186, 230, 253, 209)),
-        (0.78, (125, 211, 252, 209)),
-        (1.0, (219, 234, 254, 0)),
-    )
-    middle_colors = (
-        (0.0, (125, 211, 252, 0)),
-        (0.2, (125, 211, 252, 255)),
-        (0.52, (34, 211, 238, 255)),
-        (0.82, (56, 189, 248, 255)),
-        (1.0, (125, 211, 252, 0)),
-    )
-    front_colors = (
-        (0.0, (59, 130, 246, 0)),
-        (0.16, (37, 99, 235, 255)),
-        (0.5, (6, 182, 212, 255)),
-        (0.84, (37, 99, 235, 255)),
-        (1.0, (59, 130, 246, 0)),
-    )
-    _draw_gradient_path(layer, back, back_colors, 1.15, round(209 * shape_mix))
-    _draw_gradient_path(
-        layer,
-        middle,
-        middle_colors if shape_mix > 0.02 else (
-            (0.0, (107, 114, 128, 255)),
-            (1.0, (107, 114, 128, 255)),
-        ),
-        1.65 + (1.45 - 1.65) * shape_mix,
-        round(255 + (224 - 255) * shape_mix),
-    )
-    _draw_gradient_path(
-        layer,
-        front,
-        front_colors if shape_mix > 0.02 else (
-            (0.0, (107, 114, 128, 255)),
-            (1.0, (107, 114, 128, 255)),
-        ),
-        1.65 + (2.05 - 1.65) * shape_mix,
-        255,
-        glow=shape_mix > 0.02,
-    )
+    # 正式端读取真实音量；保留静音时的轻微波形，避免录音状态消失。
+    amplitude = .12 + .88 * (sum(levels) / len(levels) * .58 + max(levels) * .42)
+    energy = amplitude * (.65 + .35 * math.sin(phase * .7) ** 2)
+    layer = Image.new("RGBA", (size * 4, size * 4))
+    idle = (245, 252, 255)
+    wave_colors = ((194,225,255), (142,219,255), (239,253,255), (109,226,255), (194,225,255))
+    colors = tuple((offset, (*_mix_rgb(idle, rgb, shape_mix),
+                            round(255 * (1-shape_mix)) if i in (0,4) else 255))
+                   for i, (offset, rgb) in enumerate(zip((0,.18,.5,.82,1), wave_colors)))
+    for index, (height, cycles, offset) in enumerate(zip((.72,.88,1), (.8,1,1.2), (-phase*.7,phase*.85+.8,phase))):
+        points = []
+        for step in range(49):
+            t = step / 48
+            angle = math.pi + t*math.pi if index == 1 else math.pi-t*math.pi
+            from_x = 32+t*36 if index == 0 else 50+math.cos(angle)*18
+            from_y = 50 if index == 0 else 50+math.sin(angle)*18
+            wave = math.sin(t*math.tau*cycles+offset) + math.sin(t*math.tau*cycles*1.8-offset*.4)*.12
+            to_y = 50 + (wave*energy*27*height+(index-1)*7*amplitude)*math.sin(math.pi*t)**1.5
+            points.append(((from_x+(12+t*76-from_x)*shape_mix)*size/100,
+                           (from_y+(to_y-from_y)*shape_mix)*size/100))
+        opacity = shape_mix*.8 if index == 0 else .95 if index == 1 else 1
+        # 预览以 72px 为线宽基准；实际尺寸仍保持 2.25—3.25px 亮色线芯。
+        width = (1.8 + shape_mix*(0,.4,.8)[index])*1.25*size/72
+        path_layer = Image.new("RGBA", layer.size)
+        _draw_gradient_path(path_layer, points, colors, width, round(255*opacity))
+        layer.alpha_composite(path_layer)
     return layer.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def render_standby_layer(
     size: int, levels: list[float] | None = None
 ) -> Image.Image:
-    """绘制待命状态的紧凑灰色双弧圆环。"""
+    """绘制待命状态的浅白双弧圆环。"""
     return render_waveform_layer(
         size,
         [0.0] * 7 if levels is None else levels,
@@ -1130,9 +1123,7 @@ class LayeredButtonWindow:
 
         if image is None:
             if glass is None:
-                glass = render_glass_button_base(
-                    self.size, color, background_source
-                )
+                glass = render_deep_button_base(self.size, color)
             image = glass
             if not voice_shape_state:
                 source_state = "idle" if state == "disabled" else state

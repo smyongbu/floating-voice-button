@@ -26,30 +26,26 @@ def _default_model_cache_dir() -> Path:
 
 
 MODEL_CACHE_DIR = _default_model_cache_dir()
-CONFIG_VERSION = 12
+CONFIG_VERSION = 14
 DEFAULT_LOCAL_MODEL = "faster-whisper-small"
 LEGACY_LOCAL_MODELS = {
+    "qwen3-asr-0.6b-int8": DEFAULT_LOCAL_MODEL,
     "sensevoice-small-int8": DEFAULT_LOCAL_MODEL,
     "paraformer-zh-small-int8": DEFAULT_LOCAL_MODEL,
     "qwen3-asr-1.7b-q5km-hotwords": "qwen3-asr-1.7b-q5km",
 }
 DEFAULT_REALTIME_MODEL = "streaming-paraformer-bilingual-zh-en"
-ZIPFORMER_REALTIME_MODEL = "zipformer-bilingual-zh-en-exp32-int8"
 REALTIME_MODEL_IDS = frozenset({
     DEFAULT_REALTIME_MODEL,
-    ZIPFORMER_REALTIME_MODEL,
 })
 LOCAL_MODEL_IDS = frozenset({
     DEFAULT_LOCAL_MODEL,
-    "qwen3-asr-0.6b-int8",
     "qwen3-asr-1.7b-q5km",
     "faster-whisper-small",
 })
-CLOUD_PROVIDER_IDS = frozenset({"volcengine", "iflytek", "tencent", "aliyun"})
 DEFAULT_RECOGNITION_ENGINE = f"local:{DEFAULT_LOCAL_MODEL}"
 
-# 在线服务密钥只能存入 Windows 凭据管理器。这里同时清理早期版本或
-# 手工编辑配置时可能写入的常见密钥字段，防止它们被再次保存到 config.json。
+# 清理早期版本或手工编辑配置时写入的常见密钥字段，防止再次保存。
 _SECRET_CONFIG_KEYS = frozenset({
     "credentials",
     "provider_credentials",
@@ -71,7 +67,7 @@ DEFAULT_CONFIG = {
     "paste_wait_ms": 150,
     "auto_paste_enabled": True,
     "button_size": 72,
-    "button_color": "#2563EB",
+    "button_color": "#103E83",
     "button_opacity": 100,
     "global_hotkey": "Ctrl+Alt+Space",
     "standby_enabled": False,
@@ -79,7 +75,6 @@ DEFAULT_CONFIG = {
     "live_transcript_visible": True,
     "realtime_model": DEFAULT_REALTIME_MODEL,
     "recognition_engine": DEFAULT_RECOGNITION_ENGINE,
-    "fallback_model": DEFAULT_LOCAL_MODEL,
     "local_asr_device": "auto",
     "position_x": None,
     "position_y": None,
@@ -117,7 +112,7 @@ def _config_mutex():
         _kernel32.CloseHandle(handle)
 
 
-def normalize_hex_color(value: object, fallback: str = "#2563EB") -> str:
+def normalize_hex_color(value: object, fallback: str = "#103E83") -> str:
     text = str(value or "").strip().upper()
     if not text.startswith("#"):
         text = f"#{text}"
@@ -131,38 +126,19 @@ def normalize_hex_color(value: object, fallback: str = "#2563EB") -> str:
 
 
 def normalize_recognition_engine(value: object) -> str:
-    """把识别引擎统一为 ``local:模型`` 或 ``cloud:服务``。"""
+    """只接受本地模型；旧在线选择和未知值迁移到默认本地模型。"""
     text = str(value or "").strip().lower()
-    if text.startswith("online:"):
-        text = f"cloud:{text.removeprefix('online:')}"
     local_candidate = text.removeprefix("local:")
     if local_candidate in LEGACY_LOCAL_MODELS:
         text = f"local:{LEGACY_LOCAL_MODELS[local_candidate]}"
-    if text == "cloud:xfyun":
-        text = "cloud:iflytek"
-    elif text == "xfyun":
-        text = "cloud:iflytek"
     if text in LOCAL_MODEL_IDS:
         text = f"local:{text}"
-    elif text in CLOUD_PROVIDER_IDS:
-        text = f"cloud:{text}"
     prefix, separator, identifier = text.partition(":")
     if not separator:
         return DEFAULT_RECOGNITION_ENGINE
     if prefix == "local" and identifier in LOCAL_MODEL_IDS:
         return text
-    if prefix == "cloud" and identifier in CLOUD_PROVIDER_IDS:
-        return text
     return DEFAULT_RECOGNITION_ENGINE
-
-
-def normalize_fallback_model(value: object) -> str:
-    """回退模型只接受本地模型标识，不允许把在线服务串成循环回退。"""
-    text = str(value or "").strip().lower()
-    if text.startswith("local:"):
-        text = text.removeprefix("local:")
-    text = LEGACY_LOCAL_MODELS.get(text, text)
-    return text if text in LOCAL_MODEL_IDS else DEFAULT_LOCAL_MODEL
 
 
 def normalize_realtime_model(value: object) -> str:
@@ -183,6 +159,9 @@ def _normalize(raw: dict) -> dict:
 
     config["config_version"] = CONFIG_VERSION
 
+    # 只升级旧默认主色；用户自定义颜色、位置、尺寸和透明度保持原样。
+    if str(raw.get("config_version", "0")) != str(CONFIG_VERSION) and str(config.get("button_color", "")).upper() == "#2563EB":
+        config["button_color"] = "#103E83"
     config["button_color"] = normalize_hex_color(config.get("button_color"))
     config["global_hotkey"] = normalize_hotkey(config.get("global_hotkey"))
     config["standby_enabled"] = bool(config.get("standby_enabled", False))
@@ -202,7 +181,6 @@ def _normalize(raw: dict) -> dict:
     config["recognition_engine"] = normalize_recognition_engine(
         config.get("recognition_engine")
     )
-    config["fallback_model"] = normalize_fallback_model(config.get("fallback_model"))
     device = str(config.get("local_asr_device", "auto")).strip().lower()
     config["local_asr_device"] = device if device in ("auto", "cpu", "gpu") else "auto"
     try:

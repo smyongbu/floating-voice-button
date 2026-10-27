@@ -28,6 +28,7 @@ APP_VERSION = f"v{SOURCE_APP_VERSION}"
 APP_FOLDER_NAME = "语点"
 MODEL_REPOSITORY_ENV = "VOICE_INPUT_MODEL_REPOSITORY"
 FIRST_INSTALL_MODEL_IDS = (
+    "qwen3-asr-1.7b-gguf-q5-k-m",
     "faster-whisper-small",
     "streaming-paraformer-bilingual-zh-en",
 )
@@ -263,18 +264,20 @@ def pyinstaller_command(python: Path) -> list[str]:
 
 
 def write_package_docs(package_dir: Path, variant: str, copied_models: list[str]) -> None:
+    shutil.copytree(PROJECT_ROOT / "assets/licenses", package_dir / "licenses", dirs_exist_ok=True)
+    shutil.copy2(PROJECT_ROOT / "THIRD_PARTY_NOTICES.md", package_dir / "licenses/THIRD_PARTY_NOTICES.md")
     model_dir = package_dir / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
     includes_models = variant == "first-install"
     (model_dir / "模型放置说明.txt").write_text(
         "此文件夹用于存放语点的外置语音识别模型。\n"
-        "首次安装版附带 Faster-Whisper Small 与 Streaming Paraformer。\n"
+        "首次安装版附带 Faster-Whisper Small、Streaming Paraformer 与 Qwen3-ASR 1.7B。\n"
         "轻量升级版不附带模型，会复用已有 models 文件夹或正式版模型缓存；不会读取源码开发缓存。\n",
         encoding="utf-8",
     )
     (package_dir / "使用说明.txt").write_text(
         "语点 Windows 编译版\n\n"
-        f"当前包：{'首次安装版（带基础模型）' if includes_models else '轻量升级版（不带模型）'}\n"
+        f"当前包：{'首次安装版（带三个模型）' if includes_models else '轻量升级版（不带模型）'}\n"
         "第一次安装建议使用首次安装版。以后升级可下载轻量升级版，"
         "并保留旧版 models 文件夹；正式版也会复用自己的跨版本模型缓存。\n"
         f"正式版模型缓存位于 %LOCALAPPDATA%\\FloatingVoiceButton\\{MODEL_CACHE_NAMESPACE}。\n"

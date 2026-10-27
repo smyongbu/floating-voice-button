@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from config_store import DEFAULT_CONFIG, DEFAULT_REALTIME_MODEL, ZIPFORMER_REALTIME_MODEL
+from config_store import DEFAULT_CONFIG, DEFAULT_REALTIME_MODEL
 from history_store import HistoryEntry
 from settings_panel import WebSettingsApi, main as settings_panel_main
 
@@ -31,14 +31,13 @@ class WebSettingsApiTests(unittest.TestCase):
     def test_public_bridge_surface_is_strict_allowlist(self):
         expected = {
             "get_initial_state",
+            "window_action",
             "save_appearance",
             "test_standby_control",
             "test_hotkey",
             "save_recognition_settings",
             "test_local_model",
             "manage_local_model_resource",
-            "save_provider_credentials",
-            "delete_provider_credentials",
             "get_history",
             "get_history_signature",
             "copy_history",
@@ -57,6 +56,24 @@ class WebSettingsApiTests(unittest.TestCase):
 
         self.assertEqual(public_callables, expected)
         self.assertEqual(public_instance_data, set())
+
+    def test_window_actions_are_limited_and_toggle_maximize(self):
+        self.assertFalse(self.api.window_action("minimize")["ok"])
+        window = Mock()
+        self.api._window = window
+        self.assertFalse(self.api.window_action("execute")["ok"])
+        window.assert_not_called()
+        self.assertTrue(self.api.window_action("minimize")["ok"])
+        window.minimize.assert_called_once()
+        self.api.window_action("maximize")
+        window.maximize.assert_called_once()
+        self.api._window_maximized = True
+        self.api.window_action("maximize")
+        window.restore.assert_called_once()
+        with patch("settings_panel.threading.Timer") as timer:
+            self.api.window_action("close")
+            timer.assert_called_once_with(.1, window.destroy)
+            timer.return_value.start.assert_called_once()
 
     def test_invalid_color_never_reaches_config_store(self):
         invalid_colors = ("#12345", "#1234567", "#12GG56", "red", "<script>")
@@ -356,12 +373,10 @@ class WebSettingsApiTests(unittest.TestCase):
         ]
         config = {
             "recognition_engine": "local:qwen3-asr-1.7b-q5km",
-            "fallback_model": "sensevoice-small-int8",
             "local_asr_device": "auto",
         }
         with (
             patch("settings_panel.get_local_model_catalog", return_value=catalog),
-            patch("settings_panel.get_provider_catalog", return_value=[]),
             patch("settings_panel.get_realtime_model_status", return_value={}),
             patch("settings_panel.choose_model_device", return_value=("cpu", "处理器")),
         ):
@@ -452,7 +467,6 @@ class WebSettingsApiTests(unittest.TestCase):
         )
         with (
             patch("settings_panel.get_local_model_catalog", return_value=catalog),
-            patch("settings_panel.get_provider_catalog", return_value=[]),
             patch("settings_panel.choose_model_device", return_value=("cpu", "处理器")),
             patch(
                 "settings_panel.get_model_download_resource",
@@ -470,7 +484,6 @@ class WebSettingsApiTests(unittest.TestCase):
                     }
                     response = self.api.save_recognition_settings(
                         f"local:{model_id}",
-                        "sensevoice-small-int8",
                         "auto",
                         DEFAULT_REALTIME_MODEL,
                     )
@@ -479,44 +492,18 @@ class WebSettingsApiTests(unittest.TestCase):
 
         update_config.assert_not_called()
 
-    def test_save_rejects_unverified_downloadable_fallback_model(self):
-        model_id = "qwen3-asr-1.7b-q5km"
-        resource_id = "qwen3-asr-1.7b-q5km"
-        catalog = [
-            {"model_id": "sensevoice-small-int8", "available": True},
-            {"model_id": model_id, "available": True},
-        ]
-        manager = Mock()
-        manager.resource_ids = {resource_id}
-        manager.status.return_value = {"state": "completed", "verified": False}
-        self.api._model_downloads = manager
+    def test_removed_service_engine_cannot_be_saved(self):
         with (
-            patch("settings_panel.get_local_model_catalog", return_value=catalog),
-            patch("settings_panel.get_provider_catalog", return_value=[]),
-            patch("settings_panel.choose_model_device", return_value=("cpu", "处理器")),
-            patch(
-                "settings_panel.get_model_download_resource",
-                side_effect=lambda current: (
-                    {"resource_id": resource_id} if current == model_id else None
-                ),
-            ),
-            patch("settings_panel.update_config") as update_config,
+            patch("settings_panel.get_local_model_catalog", return_value=[]),
+            patch("settings_panel.update_config") as update,
         ):
-            response = self.api.save_recognition_settings(
-                "local:sensevoice-small-int8",
-                model_id,
-                "auto",
-                DEFAULT_REALTIME_MODEL,
-            )
-
+            response = self.api.save_recognition_settings("cloud:aliyun", "auto")
         self.assertFalse(response["ok"])
-        self.assertIn("本地备用模型", response["message"])
-        self.assertIn("SHA-256", response["message"])
-        update_config.assert_not_called()
+        self.assertIn("只支持本地", response["message"])
+        update.assert_not_called()
 
-    def test_save_allows_verified_downloadable_model_as_selected_and_fallback(self):
+    def test_save_allows_verified_downloadable_selected_model(self):
         selected_model = "qwen3-asr-1.7b-q5km"
-        fallback_model = selected_model
         resource_id = "qwen3-asr-1.7b-q5km"
         catalog = [
             {"model_id": selected_model, "available": True},
@@ -527,7 +514,6 @@ class WebSettingsApiTests(unittest.TestCase):
         self.api._model_downloads = manager
         updated = {
             "recognition_engine": f"local:{selected_model}",
-            "fallback_model": fallback_model,
             "local_asr_device": "auto",
             "realtime_model": DEFAULT_REALTIME_MODEL,
         }
@@ -537,7 +523,6 @@ class WebSettingsApiTests(unittest.TestCase):
         }
         with (
             patch("settings_panel.get_local_model_catalog", return_value=catalog),
-            patch("settings_panel.get_provider_catalog", return_value=[]),
             patch("settings_panel.choose_model_device", return_value=("cpu", "处理器")),
             patch(
                 "settings_panel.get_model_download_resource",
@@ -548,7 +533,6 @@ class WebSettingsApiTests(unittest.TestCase):
         ):
             response = self.api.save_recognition_settings(
                 f"local:{selected_model}",
-                fallback_model,
                 "auto",
                 DEFAULT_REALTIME_MODEL,
             )
@@ -575,7 +559,6 @@ class WebSettingsApiTests(unittest.TestCase):
         delete_response = {}
         updated = {
             "recognition_engine": f"local:{model_id}",
-            "fallback_model": "sensevoice-small-int8",
             "local_asr_device": "auto",
             "realtime_model": DEFAULT_REALTIME_MODEL,
         }
@@ -588,7 +571,6 @@ class WebSettingsApiTests(unittest.TestCase):
 
         with (
             patch("settings_panel.get_local_model_catalog", return_value=catalog),
-            patch("settings_panel.get_provider_catalog", return_value=[]),
             patch("settings_panel.choose_model_device", return_value=("cpu", "处理器")),
             patch(
                 "settings_panel.get_model_download_resource",
@@ -606,7 +588,6 @@ class WebSettingsApiTests(unittest.TestCase):
             save_thread = threading.Thread(
                 target=lambda: save_response.update(self.api.save_recognition_settings(
                     f"local:{model_id}",
-                    "sensevoice-small-int8",
                     "auto",
                     DEFAULT_REALTIME_MODEL,
                 ))
@@ -635,27 +616,24 @@ class WebSettingsApiTests(unittest.TestCase):
         catalog = [{"model_id": "sensevoice-small-int8", "available": True}]
         payload = {
             "device": "处理器",
-            "realtime_model": ZIPFORMER_REALTIME_MODEL,
+            "realtime_model": DEFAULT_REALTIME_MODEL,
         }
         updated = {
             "recognition_engine": "local:sensevoice-small-int8",
-            "fallback_model": "sensevoice-small-int8",
             "local_asr_device": "auto",
-            "realtime_model": ZIPFORMER_REALTIME_MODEL,
+            "realtime_model": DEFAULT_REALTIME_MODEL,
         }
         with (
             patch("settings_panel.choose_model_device", return_value=("cpu", "处理器")),
             patch("settings_panel.get_local_model_catalog", return_value=catalog),
-            patch("settings_panel.get_provider_catalog", return_value=[]),
             patch("settings_panel.get_realtime_model_status", return_value={"available": True}),
             patch("settings_panel.update_config", return_value=updated) as update_config,
             patch.object(self.api, "_recognition_payload", return_value=payload),
         ):
             response = self.api.save_recognition_settings(
                 "local:sensevoice-small-int8",
-                "sensevoice-small-int8",
                 "auto",
-                ZIPFORMER_REALTIME_MODEL,
+                DEFAULT_REALTIME_MODEL,
             )
 
         self.assertTrue(response["ok"])
@@ -665,7 +643,6 @@ class WebSettingsApiTests(unittest.TestCase):
         with patch("settings_panel.update_config") as update_config:
             response = self.api.save_recognition_settings(
                 "local:sensevoice-small-int8",
-                "sensevoice-small-int8",
                 "auto",
                 "unknown-streaming-model",
             )
@@ -680,9 +657,8 @@ class WebSettingsApiTests(unittest.TestCase):
         ):
             response = self.api.save_recognition_settings(
                 "local:sensevoice-small-int8",
-                "sensevoice-small-int8",
                 "auto",
-                ZIPFORMER_REALTIME_MODEL,
+                DEFAULT_REALTIME_MODEL,
             )
         self.assertFalse(response["ok"])
         self.assertIn("尚未安装完整", response["message"])
@@ -781,8 +757,8 @@ class WebPanelStaticTests(unittest.TestCase):
         self.assertIn('id="previewWaveFrontGradient"', self.html)
         self.assertIn('role="img" aria-label="待机状态按钮预览"', self.html)
         self.assertIn('role="img" aria-label="录音状态按钮预览"', self.html)
-        self.assertIn('color-mix(in srgb, var(--button-color) 82%, transparent)', self.css)
-        self.assertIn('url("voice-button-background-01.png")', self.css)
+        self.assertIn('linear-gradient(145deg, transparent, #03152c88)', self.css)
+        self.assertIn('stroke: #f5fcff', self.css)
         self.assertIn('.preview-button.is-standby .preview-layered-wave-path-middle', self.css)
         self.assertIn("buildRecordingPreviewPoints", self.javascript)
         self.assertIn("renderRecordingPreviewWave", self.javascript)
@@ -823,34 +799,17 @@ class WebPanelStaticTests(unittest.TestCase):
         self.assertNotIn("安静时显示平线", self.html)
         self.assertNotIn("Windows 本机识别", self.html)
 
-    def test_local_and_online_models_have_separate_navigation_and_views(self):
+    def test_only_local_models_have_navigation_and_settings(self):
         self.assertIn('data-view="localModel"', self.html)
-        self.assertIn('data-view="onlineModel"', self.html)
         self.assertIn('id="localModelView"', self.html)
-        self.assertIn('id="onlineModelView"', self.html)
-        self.assertIn(">本地模式<", self.html)
-        self.assertIn(">在线模型<", self.html)
-        self.assertNotIn(">语言识别模型<", self.html)
         self.assertIn('id="localEngineOptions"', self.html)
-        self.assertIn('id="onlineEngineOptions"', self.html)
         self.assertIn('id="localModelList"', self.html)
-        self.assertIn("本地识别模型", self.html)
-        self.assertIn("火山引擎、科大讯飞、腾讯云和阿里云", self.html)
-        self.assertIn("不包含百度", self.html)
-        self.assertIn('value="auto"', self.html)
-        self.assertIn('value="cpu"', self.html)
-        self.assertIn('value="gpu"', self.html)
         self.assertIn('id="localModelSaveButton"', self.html)
-        self.assertIn('id="onlineModelSaveButton"', self.html)
-        self.assertIn('id="sidebarPrivacyText"', self.html)
         self.assertIn("本地模式不会上传录音", self.html + self.javascript)
-        self.assertIn("在线识别会将录音上传至所选服务", self.javascript)
+        for removed in ("onlineModel", "onlineEngine", "providerList", "fallbackModel"):
+            self.assertNotIn(removed, self.html + self.javascript)
         self.assertIn('callApi(\n      "save_recognition_settings"', self.javascript)
         self.assertIn('callApi("test_local_model"', self.javascript)
-        self.assertIn('callApi("save_provider_credentials"', self.javascript)
-        self.assertIn('callApi("delete_provider_credentials"', self.javascript)
-        self.assertIn('"最低配置"', self.javascript)
-        self.assertIn('"建议配置"', self.javascript)
 
     def test_realtime_models_match_confirmed_local_mode_preview(self):
         self.assertIn('id="realtimeModelOptions"', self.html)
@@ -858,11 +817,11 @@ class WebPanelStaticTests(unittest.TestCase):
         self.assertIn('class="card recognition-card local-consistent-card realtime-model-row"', self.html)
         self.assertIn('id="localDeviceHeading"', self.html)
         self.assertIn("实时显示模型", self.html)
-        self.assertIn("选择边说边显示文字的模型。", self.html)
+        self.assertIn("讲话时显示临时文字。", self.html)
         self.assertIn('name="realtimeModel" value="streaming-paraformer-bilingual-zh-en"', self.html)
-        self.assertIn('name="realtimeModel" value="zipformer-bilingual-zh-en-exp32-int8"', self.html)
+        self.assertNotIn('value="zipformer-bilingual-zh-en-exp32-int8"', self.html)
         self.assertIn("Streaming Paraformer", self.html)
-        self.assertIn("Zipformer", self.html)
+        self.assertNotIn("Zipformer", self.html)
         self.assertIn("selectedRealtimeModel()", self.javascript)
         self.assertIn("state.model.realtime_model", self.javascript)
         self.assertIn('"save_recognition_settings",', self.javascript)
@@ -966,17 +925,10 @@ class WebPanelStaticTests(unittest.TestCase):
         api = WebSettingsApi(Mock(), Mock(), store=Mock())
         with patch("settings_panel.update_config") as update_config:
             response = api.save_recognition_settings(
-                "local:sensevoice-small-int8", "sensevoice-small-int8", "未知设备"
+                "local:sensevoice-small-int8", "未知设备"
             )
         self.assertFalse(response["ok"])
         update_config.assert_not_called()
-
-    def test_online_privacy_and_credential_storage_are_explicit(self):
-        self.assertIn("会把本次完整录音上传", self.html)
-        self.assertIn("可能产生费用", self.html)
-        self.assertIn("最长 55 秒", self.html)
-        self.assertIn("保存到本机", self.javascript)
-        self.assertNotIn("get_provider_credentials", self.javascript)
 
     def test_appearance_and_recording_sections_keep_all_existing_controls(self):
         preview = self.html.split('<article class="card preview-card">', 1)[1].split("</article>", 1)[0]
@@ -1129,17 +1081,11 @@ class WebPanelStaticTests(unittest.TestCase):
         self.assertNotRegex(save_rule.group("body"), r"position:\s*sticky")
         self.assertRegex(stack_rule.group("body"), r"padding-bottom:\s*0")
 
-    def test_plain_model_provider_and_notice_rows_use_dividers(self):
+    def test_plain_local_model_rows_keep_dividers(self):
         local_row = re.search(r"\.local-model-row\s*\{(?P<body>.*?)\}", self.css, re.DOTALL)
-        provider = re.search(r"\.provider-card\s*\{(?P<body>.*?)\}", self.css, re.DOTALL)
-        notice = re.search(r"\.upload-notice\s*\{(?P<body>.*?)\}", self.css, re.DOTALL)
-        for rule in (local_row, provider, notice):
-            self.assertIsNotNone(rule)
-            self.assertRegex(rule.group("body"), r"background:\s*transparent|border-bottom:\s*1px solid var\(--border\)")
-            self.assertRegex(rule.group("body"), r"border-radius:\s*0")
+        self.assertIsNotNone(local_row)
         self.assertRegex(local_row.group("body"), r"border-bottom:\s*1px solid var\(--border\)")
-        self.assertRegex(provider.group("body"), r"border-bottom:\s*1px solid var\(--border\)")
-        self.assertRegex(notice.group("body"), r"border-left:\s*3px solid")
+        self.assertRegex(local_row.group("body"), r"border-radius:\s*0")
 
     def test_history_detail_uses_flat_full_width_workspace(self):
         self.assertIn('<div class="history-layout">', self.html)

@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from config_store import DEFAULT_REALTIME_MODEL, ZIPFORMER_REALTIME_MODEL
+from config_store import DEFAULT_REALTIME_MODEL
 import realtime_asr
 
 
@@ -127,7 +127,7 @@ class RealtimeAsrTests(unittest.TestCase):
         self.assertTrue(second.wait_closed(timeout=0.1))
 
     def test_source_run_uses_shared_realtime_model_without_copying(self):
-        source = Path("O:/程序/共享模型仓库/streaming-paraformer")
+        source = Path("D:/程序/共享模型仓库/streaming-paraformer")
         cache = Path("C:/Users/test/AppData/Local/FloatingVoiceButton/models/streaming-paraformer")
         spec = realtime_asr.REALTIME_MODEL_SPECS[DEFAULT_REALTIME_MODEL]
         with (
@@ -154,23 +154,11 @@ class RealtimeAsrTests(unittest.TestCase):
         paraformer_files = realtime_asr.REALTIME_MODEL_SPECS[
             DEFAULT_REALTIME_MODEL
         ]["files"]
-        zipformer_files = realtime_asr.REALTIME_MODEL_SPECS[
-            ZIPFORMER_REALTIME_MODEL
-        ]["files"]
         self.assertEqual(
             set(paraformer_files),
             {"encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt"},
         )
-        self.assertEqual(
-            set(zipformer_files),
-            {
-                "encoder-epoch-99-avg-1.int8.onnx",
-                "decoder-epoch-99-avg-1.onnx",
-                "joiner-epoch-99-avg-1.int8.onnx",
-                "tokens.txt",
-            },
-        )
-        for model_id in (DEFAULT_REALTIME_MODEL, ZIPFORMER_REALTIME_MODEL):
+        for model_id in (DEFAULT_REALTIME_MODEL,):
             spec = realtime_asr.REALTIME_MODEL_SPECS[model_id]
             self.assertTrue(str(spec["download_url"]).startswith("https://"))
             self.assertTrue(all(size > 0 and len(digest) == 64 for size, digest in spec["files"].values()))
@@ -232,30 +220,6 @@ class RealtimeAsrTests(unittest.TestCase):
         self.assertEqual(kwargs["encoder"], str(model_dir / "encoder.int8.onnx"))
         self.assertEqual(kwargs["decoder"], str(model_dir / "decoder.int8.onnx"))
         self.assertEqual(kwargs["decoding_method"], "greedy_search")
-
-    def test_zipformer_factory_uses_official_online_api(self):
-        model_dir = Path("C:/models/zipformer")
-        online = types.SimpleNamespace(
-            from_paraformer=Mock(return_value=object()),
-            from_transducer=Mock(return_value=object()),
-        )
-        runtime = types.SimpleNamespace(OnlineRecognizer=online)
-        with (
-            patch.dict("sys.modules", {"sherpa_onnx": runtime}),
-            patch.object(realtime_asr, "install_realtime_model_locally", return_value=model_dir),
-        ):
-            recognizer = realtime_asr.RealtimeRecognizer(model_id=ZIPFORMER_REALTIME_MODEL)
-            recognizer.load()
-
-        online.from_transducer.assert_called_once()
-        online.from_paraformer.assert_not_called()
-        kwargs = online.from_transducer.call_args.kwargs
-        self.assertEqual(
-            kwargs["encoder"],
-            str(model_dir / "encoder-epoch-99-avg-1.int8.onnx"),
-        )
-        self.assertEqual(kwargs["model_type"], "zipformer")
-        self.assertEqual(kwargs["decoding_method"], "modified_beam_search")
 
     def test_feed_is_non_blocking_and_finish_returns_final_update(self):
         updates = []

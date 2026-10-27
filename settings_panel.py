@@ -17,17 +17,16 @@ except ImportError:
 
 from automation import write_clipboard_text
 from audio_level import AudioLevelMonitor
-from cloud_asr import get_provider_catalog, validate_credentials
 from config_store import (
     APP_DATA_DIR,
     DEFAULT_REALTIME_MODEL,
     DEFAULT_CONFIG,
     REALTIME_MODEL_IDS,
     load_config,
+    normalize_recognition_engine,
     normalize_realtime_model,
     update_config,
 )
-from credential_store import CredentialStore
 from history_store import HistoryEntry, HistoryRevisionMismatch, HistoryStore
 from global_hotkey import parse_hotkey
 from logger import build_loggers
@@ -96,11 +95,28 @@ def _serialize_entry(entry: HistoryEntry) -> dict:
 class WebSettingsApi:
     """只向本地 WebView 暴露设置与历史所需的最小接口。"""
 
+    def window_action(self, action: str) -> dict:
+        """网页窗口按钮仅开放最小化、最大化/还原和关闭。"""
+        window = getattr(self, "_window", None)
+        if window is None:
+            return _failure("窗口尚未就绪。")
+        if action == "minimize":
+            window.minimize()
+        elif action == "maximize":
+            if getattr(self, "_window_maximized", False):
+                window.restore()
+            else:
+                window.maximize()
+        elif action == "close":
+            threading.Timer(.1, window.destroy).start()
+        else:
+            return _failure("不支持的窗口操作。")
+        return {"ok": True}
+
     def __init__(self, run_log, error_log, store: HistoryStore | None = None) -> None:
         # pywebview 会递归暴露所有非下划线成员，因此依赖对象必须保持私有。
         self._run_log = run_log
         self._error_log = error_log
-        self._credential_store = CredentialStore()
         self._voice_test_lock = threading.RLock()
         self._model_resource_lock = threading.RLock()
         self._voice_test_monitor: AudioLevelMonitor | None = None
@@ -232,14 +248,8 @@ class WebSettingsApi:
     def _recognition_payload(self, config: dict | None = None) -> dict:
         current = config or load_config()
         preference = str(current.get("local_asr_device", "auto"))
-        engine_id = str(
-            current.get("recognition_engine", "local:faster-whisper-small")
-        )
-        device_model_id = (
-            engine_id.partition(":")[2]
-            if engine_id.startswith("local:")
-            else str(current.get("fallback_model", "faster-whisper-small"))
-        )
+        engine_id = normalize_recognition_engine(current.get("recognition_engine"))
+        device_model_id = engine_id.partition(":")[2]
         try:
             _provider, device_label = choose_model_device(
                 device_model_id, preference
@@ -274,31 +284,6 @@ class WebSettingsApi:
                 # 同一资源可对应多个识别 profile；一次 payload 内必须使用同一快照。
                 model["resource_status"] = dict(resource_statuses[resource_id])
             local_models.append(model)
-        providers = []
-        provider_descriptions = {
-            "volcengine": "大模型录音文件极速版，整段上传后同步返回。",
-            "iflytek": "语音听写流式接口，录音会按 40 毫秒分帧上传，耗时接近录音长度。",
-            "tencent": "一句话识别，整段上传后同步返回。",
-            "aliyun": "一句话识别，整段上传后同步返回。",
-        }
-        for incoming in get_provider_catalog():
-            provider_id = str(incoming["id"])
-            providers.append({
-                "provider_id": provider_id,
-                "name": str(incoming["name"]),
-                "short_description": str(incoming["service"]),
-                "description": provider_descriptions.get(provider_id, str(incoming["service"])),
-                "configured": self._credential_store.exists(provider_id),
-                "fields": [
-                    {
-                        "name": str(field["key"]),
-                        "label": str(field["label"]),
-                        "secret": bool(field.get("secret", True)),
-                        "max_length": 512,
-                    }
-                    for field in incoming["credential_fields"]
-                ],
-            })
         with self._voice_test_lock:
             voice_test_active = self._voice_test_monitor is not None
             voice_test_model_id = self._voice_test_model_id
@@ -316,12 +301,10 @@ class WebSettingsApi:
                 current.get("realtime_model")
             ),
             "realtime_models": realtime_models,
-            "fallback_model": str(current.get("fallback_model", "faster-whisper-small")),
             "preference": preference,
             "device": device_label,
             "device_error": device_error,
             "local_models": local_models,
-            "providers": providers,
             "voice_test_active": voice_test_active,
             "voice_test_model_id": voice_test_model_id,
         }
@@ -329,7 +312,6 @@ class WebSettingsApi:
     def save_recognition_settings(
         self,
         engine_id: str,
-        fallback_model: str,
         device: str,
         realtime_model: str | None = None,
     ) -> dict:
@@ -351,7 +333,6 @@ class WebSettingsApi:
                 str(item["model_id"]): item for item in get_local_model_catalog()
             }
             local_ids = set(local_catalog)
-            provider_ids = {str(item["id"]) for item in get_provider_catalog()}
             selected_engine = str(engine_id or "").strip().lower()
             downloadable_roles: list[tuple[str, str]] = []
             if selected_engine.startswith("local:"):
@@ -363,26 +344,10 @@ class WebSettingsApi:
                     return _failure("所选本地模型尚未安装完整或缺少运行组件。")
                 choose_model_device(selected_local_id, normalized)
                 downloadable_roles.append(("所选本地模型", selected_local_id))
-            elif selected_engine.startswith("cloud:"):
-                provider_id = selected_engine.split(":", 1)[1]
-                if provider_id not in provider_ids:
-                    return _failure("所选在线服务无效。")
-                if not self._credential_store.exists(provider_id):
-                    return _failure("请先填写并保存所选在线服务的凭据。")
             else:
-                return _failure("识别方式无效。")
-            normalized_fallback = str(fallback_model or "").strip().lower()
-            if normalized_fallback not in local_ids:
-                return _failure("本地备用模型无效。")
-            fallback_status = local_catalog[normalized_fallback]
-            if not bool(fallback_status.get("available")):
-                return _failure("本地备用模型尚未安装完整或缺少运行组件。")
-            downloadable_roles.append(("本地备用模型", normalized_fallback))
-            if selected_engine.startswith("cloud:"):
-                choose_model_device(normalized_fallback, normalized)
+                return _failure("只支持本地识别模型。")
             changes = {
                 "recognition_engine": selected_engine,
-                "fallback_model": normalized_fallback,
                 "local_asr_device": normalized,
                 "realtime_model": selected_realtime_model,
             }
@@ -436,7 +401,6 @@ class WebSettingsApi:
     def _resource_is_in_use(self, resource_id: str) -> bool:
         config = load_config()
         referenced_model_ids = [
-            str(config.get("fallback_model") or ""),
             str(config.get("realtime_model") or ""),
         ]
         engine_id = str(config.get("recognition_engine") or "")
@@ -477,7 +441,7 @@ class WebSettingsApi:
             elif normalized_action == "delete":
                 with self._model_resource_lock:
                     if self._resource_is_in_use(resource_id):
-                        return _failure("该模型正在作为当前模型或在线备用模型，请先切换并保存。")
+                        return _failure("该模型正在使用，请先切换并保存。")
                     with self._voice_test_lock:
                         if self._active_test_kind == "model":
                             return _failure("语音测试正在进行，请先停止后再删除模型。")
@@ -736,55 +700,6 @@ class WebSettingsApi:
             idle = not self._active_test_kind
         if idle:
             self._test_mode_lease.release()
-
-    def save_provider_credentials(self, provider_id: str, fields: dict) -> dict:
-        operation_id = self._operation_id()
-        provider = str(provider_id or "").strip().lower()
-        try:
-            existing = self._credential_store.load(provider)
-            submitted = dict(fields) if isinstance(fields, dict) else {}
-            merged = dict(existing)
-            for key, value in submitted.items():
-                text = str(value or "").strip()
-                if text:
-                    merged[str(key)] = text
-            validated = validate_credentials(provider, merged)
-            self._credential_store.save(provider, validated)
-            self._run_log.info(
-                "面板操作完成 | 编号=%s | 阶段=保存在线识别凭据 | 服务=%s",
-                operation_id, provider,
-            )
-            return _success(self._recognition_payload(), "在线服务凭据已安全保存到本机。")
-        except Exception as exc:
-            self._error_log.error(
-                "面板操作失败 | 编号=%s | 阶段=保存在线识别凭据 | 服务=%s | 异常类型=%s",
-                operation_id, provider, type(exc).__name__,
-            )
-            message = str(exc) if type(exc).__name__.endswith("ConfigurationError") else "凭据保存失败，请查看错误日志。"
-            return _failure(message)
-
-    def delete_provider_credentials(self, provider_id: str) -> dict:
-        operation_id = self._operation_id()
-        provider = str(provider_id or "").strip().lower()
-        allowed = {str(item["id"]) for item in get_provider_catalog()}
-        if provider not in allowed:
-            return _failure("在线服务无效。")
-        try:
-            self._credential_store.delete(provider)
-            current = load_config()
-            if str(current.get("recognition_engine", "")).endswith(f":{provider}"):
-                update_config({"recognition_engine": "local:faster-whisper-small"})
-            self._run_log.info(
-                "面板操作完成 | 编号=%s | 阶段=删除在线识别凭据 | 服务=%s",
-                operation_id, provider,
-            )
-            return _success(self._recognition_payload(), "在线服务凭据已从本机删除。")
-        except Exception as exc:
-            self._error_log.error(
-                "面板操作失败 | 编号=%s | 阶段=删除在线识别凭据 | 服务=%s | 异常类型=%s",
-                operation_id, provider, type(exc).__name__,
-            )
-            return _failure("凭据删除失败，请查看错误日志。")
 
     def save_appearance(
         self,
@@ -1077,7 +992,7 @@ def main() -> None:
     webview.settings["OPEN_DEVTOOLS_IN_DEBUG"] = False
     webview.settings["REMOTE_DEBUGGING_PORT"] = None
     webview.settings["SHOW_DEFAULT_MENUS"] = False
-    webview.create_window(
+    window = webview.create_window(
         PANEL_TITLE,
         url=str(WEB_ENTRY),
         js_api=api,
@@ -1085,13 +1000,19 @@ def main() -> None:
         height=680,
         min_size=(840, 560),
         resizable=True,
+        frameless=True,
+        easy_drag=False,
         background_color="#FFFFFF",
         text_select=True,
         zoomable=False,
     )
+    api._window = window
+    window.events.maximized += lambda: setattr(api, "_window_maximized", True)
+    window.events.restored += lambda: setattr(api, "_window_maximized", False)
     run_log.info("设置与历史记录窗口启动 | 界面=HTML/CSS/JavaScript | 引擎=WebView2")
     try:
-        webview.start(gui="edgechromium", debug=False, private_mode=True)
+        webview.start(gui="edgechromium", debug=False, private_mode=True,
+                      icon=str(PROJECT_DIR / "assets" / "app.ico"))
     except Exception as exc:
         error_log.exception(
             "设置窗口启动失败 | 阶段=启动网页界面 | 异常类型=%s",

@@ -10,6 +10,14 @@
 </head>
 <body>
   <div class="app-shell">
+  <div class="window-toolbar">
+    <div class="window-drag pywebview-drag-region" aria-hidden="true"></div>
+    <div class="window-actions" role="group" aria-label="窗口操作">
+      <button type="button" data-window-action="minimize" aria-label="最小化" title="最小化" disabled>─</button>
+      <button type="button" data-window-action="maximize" aria-label="最大化或还原" title="最大化或还原" disabled>□</button>
+      <button type="button" data-window-action="close" aria-label="关闭设置窗口" title="关闭" disabled>×</button>
+    </div>
+  </div>
     <aside class="sidebar" aria-label="设置导航">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">
@@ -35,12 +43,6 @@
             <path d="M12 3 4.5 7v10L12 21l7.5-4V7L12 3Z"/><path d="m4.8 7.2 7.2 4 7.2-4M12 11.2V21"/>
           </svg>
           <span>本地模式</span>
-        </button>
-        <button class="nav-item" type="button" data-view="onlineModel" aria-selected="false">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M7.5 18.5h9.2a4.3 4.3 0 0 0 .5-8.6A6 6 0 0 0 5.8 8.4a5.1 5.1 0 0 0 1.7 10.1Z"/><path d="m9 14 3-3 3 3M12 11v6"/>
-          </svg>
-          <span>在线模型</span>
         </button>
         <button class="nav-item history-nav-item" type="button" data-view="history" aria-selected="false">
           <span class="nav-count" id="navHistoryCount">0</span>
@@ -75,10 +77,10 @@
                 <div class="preview-state" role="img" aria-label="待机状态按钮预览">
                   <div class="preview-button is-standby" data-preview-button>
                     <span class="preview-layered-wave" aria-hidden="true">
-                      <svg class="preview-layered-wave-svg" viewBox="0 0 120 72" preserveAspectRatio="none" focusable="false">
-                        <path class="preview-layered-wave-path preview-layered-wave-path-back" d="M38 36 L82 36"/>
-                        <path class="preview-layered-wave-path preview-layered-wave-path-middle" d="M38 36 A22 22 0 0 0 82 36"/>
-                        <path class="preview-layered-wave-path preview-layered-wave-path-front" d="M38 36 A22 22 0 0 1 82 36"/>
+                      <svg class="preview-layered-wave-svg" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">
+                        <path class="preview-layered-wave-path preview-layered-wave-path-back" d="M32 50 L68 50"/>
+                        <path class="preview-layered-wave-path preview-layered-wave-path-middle" d="M32 50 A18 18 0 0 0 68 50"/>
+                        <path class="preview-layered-wave-path preview-layered-wave-path-front" d="M32 50 A18 18 0 0 1 68 50"/>
                       </svg>
                     </span>
                   </div>
@@ -86,28 +88,11 @@
                 <div class="preview-state" role="img" aria-label="录音状态按钮预览">
                   <div class="preview-button is-recording" data-preview-button>
                     <span class="preview-layered-wave" id="recordingLayeredWave" aria-hidden="true">
-                      <svg class="preview-layered-wave-svg" viewBox="0 0 120 72" preserveAspectRatio="none" focusable="false">
+                      <svg class="preview-layered-wave-svg" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">
                         <defs>
-                          <linearGradient id="previewWaveBackGradient" x1="0" y1="0" x2="1" y2="0">
-                            <stop offset="0" stop-color="#dbeafe" stop-opacity="0"/>
-                            <stop offset=".22" stop-color="#bae6fd" stop-opacity=".82"/>
-                            <stop offset=".78" stop-color="#7dd3fc" stop-opacity=".82"/>
-                            <stop offset="1" stop-color="#dbeafe" stop-opacity="0"/>
-                          </linearGradient>
-                          <linearGradient id="previewWaveMiddleGradient" x1="0" y1="0" x2="1" y2="0">
-                            <stop offset="0" stop-color="#7dd3fc" stop-opacity="0"/>
-                            <stop offset=".2" stop-color="#7dd3fc"/>
-                            <stop offset=".52" stop-color="#22d3ee"/>
-                            <stop offset=".82" stop-color="#38bdf8"/>
-                            <stop offset="1" stop-color="#7dd3fc" stop-opacity="0"/>
-                          </linearGradient>
-                          <linearGradient id="previewWaveFrontGradient" x1="0" y1="0" x2="1" y2="0">
-                            <stop offset="0" stop-color="#3b82f6" stop-opacity="0"/>
-                            <stop offset=".16" stop-color="#2563eb"/>
-                            <stop offset=".5" stop-color="#06b6d4"/>
-                            <stop offset=".84" stop-color="#2563eb"/>
-                            <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-                          </linearGradient>
+                          <linearGradient id="previewWaveBackGradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c2e1ff" stop-opacity="0"/><stop offset=".18" stop-color="#8edbff"/><stop offset=".5" stop-color="#effdff"/><stop offset=".82" stop-color="#6de2ff"/><stop offset="1" stop-color="#c2e1ff" stop-opacity="0"/></linearGradient>
+                          <linearGradient id="previewWaveMiddleGradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c2e1ff" stop-opacity="0"/><stop offset=".18" stop-color="#8edbff"/><stop offset=".5" stop-color="#effdff"/><stop offset=".82" stop-color="#6de2ff"/><stop offset="1" stop-color="#c2e1ff" stop-opacity="0"/></linearGradient>
+                          <linearGradient id="previewWaveFrontGradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c2e1ff" stop-opacity="0"/><stop offset=".18" stop-color="#8edbff"/><stop offset=".5" stop-color="#effdff"/><stop offset=".82" stop-color="#6de2ff"/><stop offset="1" stop-color="#c2e1ff" stop-opacity="0"/></linearGradient>
                         </defs>
                         <path class="preview-layered-wave-path preview-layered-wave-path-back" stroke="url(#previewWaveBackGradient)"/>
                         <path class="preview-layered-wave-path preview-layered-wave-path-middle" stroke="url(#previewWaveMiddleGradient)"/>
@@ -122,10 +107,10 @@
             <div class="field-group appearance-color-group">
               <label for="colorText">按钮颜色</label>
               <div class="color-control">
-                <input id="colorPicker" class="color-picker" type="color" value="#2563EB" aria-label="选择按钮颜色">
+                <input id="colorPicker" class="color-picker" type="color" value="#103E83" aria-label="选择按钮颜色">
                 <div class="text-field color-text-field">
                   <span id="colorSwatch" aria-hidden="true"></span>
-                  <input id="colorText" type="text" value="#2563EB" maxlength="7" spellcheck="false" autocomplete="off">
+                  <input id="colorText" type="text" value="#103E83" maxlength="7" spellcheck="false" autocomplete="off">
                 </div>
               </div>
               <div class="swatches" aria-label="常用颜色">
@@ -240,7 +225,7 @@
         <header class="page-header">
           <div>
             <h1 id="localModelTitle">本地模式</h1>
-            <p>音频不会上传，识别完全在本机运行，但会占用一定的电脑性能。</p>
+            <p>语音在本机处理。分别选择实时显示和停止后的识别模型。</p>
           </div>
           <span class="save-state" id="localModelState"><i></i>正在检查</span>
         </header>
@@ -250,7 +235,7 @@
             <div class="section-heading">
               <div>
                 <h2 id="realtimeModelHeading">实时显示模型</h2>
-                <p>选择边说边显示文字的模型。</p>
+                <p>讲话时显示临时文字。</p>
               </div>
             </div>
             <fieldset class="mode-options" id="realtimeModelOptions">
@@ -259,18 +244,14 @@
                 <input type="radio" name="realtimeModel" value="streaming-paraformer-bilingual-zh-en">
                 <span><b>Streaming Paraformer</b><small>中英混说更准确</small></span>
               </label>
-              <label class="mode-option">
-                <input type="radio" name="realtimeModel" value="zipformer-bilingual-zh-en-exp32-int8">
-                <span><b>Zipformer</b><small>响应更快，占用更低</small></span>
-              </label>
             </fieldset>
           </section>
 
           <section class="card recognition-card local-consistent-card" aria-labelledby="localModelsHeading">
             <div class="section-heading">
               <div>
-                <h2 id="localModelsHeading">本地识别模型</h2>
-                <p>按语言范围和电脑性能选择；切换模型不会上传语音。</p>
+                <h2 id="localModelsHeading">停止后识别模型</h2>
+                <p>停止录音后生成最终文字，按识别效果和电脑性能选择。</p>
               </div>
             </div>
             <div class="local-model-workspace">
@@ -302,54 +283,6 @@
           <div class="model-save-bar local-save-bar">
             <p id="localRecognitionSummary">当前选择：Streaming Paraformer；Faster-Whisper Small；自动选择</p>
             <button class="button button-primary" id="localModelSaveButton" type="button">保存并应用</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="view" id="onlineModelView" aria-labelledby="onlineModelTitle" hidden>
-        <header class="page-header">
-          <div>
-            <h1 id="onlineModelTitle">在线模型</h1>
-            <p>音频会上传至所选服务商识别，需要网络连接，并可能产生费用。</p>
-          </div>
-          <span class="save-state" id="onlineModelState"><i></i>正在检查</span>
-        </header>
-
-        <div class="recognition-stack">
-          <section class="card recognition-card" aria-labelledby="onlineEngineHeading">
-            <div class="section-heading">
-              <div>
-                <h2 id="onlineEngineHeading">在线识别设置</h2>
-                <p>只有已保存凭据的服务可以设为当前识别模型。</p>
-              </div>
-            </div>
-            <fieldset class="engine-options" id="onlineEngineOptions">
-              <legend class="sr-only">选择在线识别模型</legend>
-            </fieldset>
-            <div class="fallback-setting">
-              <label for="fallbackModel">在线失败时的本地备用模型</label>
-              <select id="fallbackModel"></select>
-              <p>只在网络或服务临时故障时回退；密钥、欠费或参数错误会直接提示。</p>
-            </div>
-          </section>
-
-          <section class="card recognition-card" aria-labelledby="cloudProvidersHeading">
-            <div class="section-heading">
-              <div>
-                <h2 id="cloudProvidersHeading">国内在线识别服务</h2>
-                <p>已接入火山引擎、科大讯飞、腾讯云和阿里云；不包含百度。</p>
-              </div>
-            </div>
-            <div class="upload-notice">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 3.5 6.5V12c0 4.7 3.5 7.7 8.5 9 5-1.3 8.5-4.3 8.5-9V6.5L12 3Z"/><path d="M9 12h6M12 9v6"/></svg>
-              <p><strong>隐私与费用提示</strong><span>启用在线服务会把本次完整录音上传给所选厂商，并可能产生费用。在线录音最长 55 秒。</span></p>
-            </div>
-            <div class="provider-list" id="providerList"></div>
-          </section>
-
-          <div class="model-save-bar">
-            <p id="onlineRecognitionSummary">在线识别会上传本次完整录音。</p>
-            <button class="button button-primary" id="onlineModelSaveButton" type="button">保存并应用</button>
           </div>
         </div>
       </section>

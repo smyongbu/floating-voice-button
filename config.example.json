@@ -1,5 +1,5 @@
 {
-  "config_version": 12,
+  "config_version": 13,
   "paste_wait_ms": 150,
   "auto_paste_enabled": true,
   "button_size": 72,
@@ -10,7 +10,6 @@
   "live_transcript_visible": true,
   "realtime_model": "streaming-paraformer-bilingual-zh-en",
   "recognition_engine": "local:faster-whisper-small",
-  "fallback_model": "faster-whisper-small",
   "local_asr_device": "auto",
   "position_x": null,
   "position_y": null
