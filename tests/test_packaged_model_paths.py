@@ -53,9 +53,9 @@ class PackagedModelPathTests(unittest.TestCase):
             root = Path(directory)
             source_root = root / "package-models"
             release_cache = root / config_store.MODEL_CACHE_NAMESPACE
-            development_model = root / "models" / local_asr.QWEN3_MODEL_ID
+            development_model = root / "models" / local_asr.FASTER_WHISPER_MODEL_ID
             development_model.mkdir(parents=True)
-            metadata = local_asr.LOCAL_MODELS[local_asr.QWEN3_MODEL_ID]
+            metadata = local_asr.LOCAL_MODELS[local_asr.FASTER_WHISPER_MODEL_ID]
             for relative in metadata["required_files"]:
                 path = development_model / Path(relative)
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,14 +70,14 @@ class PackagedModelPathTests(unittest.TestCase):
                     return_value=(True, "运行组件可用。"),
                 ),
             ):
-                status = local_asr.get_local_model_status(local_asr.QWEN3_MODEL_ID)
+                status = local_asr.get_local_model_status(local_asr.FASTER_WHISPER_MODEL_ID)
 
             self.assertFalse(status["installed"])
             self.assertFalse(status["available"])
             self.assertEqual(status["status"], "未安装")
             self.assertEqual(
                 Path(status["local_path"]),
-                release_cache / local_asr.QWEN3_MODEL_ID,
+                release_cache / local_asr.FASTER_WHISPER_MODEL_ID,
             )
             with patch.object(realtime_asr, "MODEL_CACHE_DIR", release_cache):
                 _model_id, _spec, _source, local_dir = realtime_asr._model_paths(

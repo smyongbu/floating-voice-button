@@ -18,7 +18,6 @@ from typing import Any, Callable
 from config_store import (
     DEFAULT_REALTIME_MODEL,
     MODEL_CACHE_DIR,
-    ZIPFORMER_REALTIME_MODEL,
     normalize_realtime_model,
 )
 
@@ -72,44 +71,15 @@ REALTIME_MODEL_SPECS: dict[str, dict[str, Any]] = {
             "sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2"
         ),
     },
-    ZIPFORMER_REALTIME_MODEL: {
-        "name": "Zipformer",
-        "directory": "k2fsa-zipformer-bilingual-zh-en-t-exp32-int8-2024-03-20",
-        "factory": "from_transducer",
-        "files": {
-            "encoder-epoch-99-avg-1.int8.onnx": (
-                42_980_793,
-                "db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb",
-            ),
-            "decoder-epoch-99-avg-1.onnx": (
-                13_877_276,
-                "89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906",
-            ),
-            "joiner-epoch-99-avg-1.int8.onnx": (
-                3_228_485,
-                "bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9",
-            ),
-            "tokens.txt": (
-                56_317,
-                "a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3",
-            ),
-        },
-        "description": "响应更快，占用更低",
-        "minimum": "双核 64 位处理器、4 GB 内存",
-        "recommended": "4 核处理器、8 GB 内存",
-        "download_url": (
-            "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/"
-            "tree/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3"
-        ),
-    },
+
 }
 
 # 保留旧常量名称，避免现有诊断和第三方来源测试失去固定清单入口。
-MODEL_DIRECTORY_NAME = str(REALTIME_MODEL_SPECS[ZIPFORMER_REALTIME_MODEL]["directory"])
+MODEL_DIRECTORY_NAME = str(REALTIME_MODEL_SPECS[DEFAULT_REALTIME_MODEL]["directory"])
 MODEL_SOURCE_DIR = MODEL_REPOSITORY_ROOT / MODEL_DIRECTORY_NAME
-MODEL_LOCAL_DIR = MODEL_CACHE_DIR / ZIPFORMER_REALTIME_MODEL
-MODEL_FILES = REALTIME_MODEL_SPECS[ZIPFORMER_REALTIME_MODEL]["files"]
-MODEL_DOWNLOAD_URL = str(REALTIME_MODEL_SPECS[ZIPFORMER_REALTIME_MODEL]["download_url"])
+MODEL_LOCAL_DIR = MODEL_CACHE_DIR / DEFAULT_REALTIME_MODEL
+MODEL_FILES = REALTIME_MODEL_SPECS[DEFAULT_REALTIME_MODEL]["files"]
+MODEL_DOWNLOAD_URL = str(REALTIME_MODEL_SPECS[DEFAULT_REALTIME_MODEL]["download_url"])
 _END = object()
 _INTERNAL_TOKEN = re.compile(r"<[^>]+>")
 _WHITESPACE = re.compile(r"\s+")
@@ -262,7 +232,6 @@ def get_realtime_model_status(
 def get_realtime_model_catalog() -> list[dict[str, object]]:
     return [
         get_realtime_model_status(DEFAULT_REALTIME_MODEL),
-        get_realtime_model_status(ZIPFORMER_REALTIME_MODEL),
     ]
 
 
@@ -415,23 +384,12 @@ class RealtimeRecognizer:
                 "rule3_min_utterance_length": self.rule3_min_utterance_length,
                 "provider": "cpu",
             }
-            if spec["factory"] == "from_paraformer":
-                self._recognizer = sherpa_onnx.OnlineRecognizer.from_paraformer(
-                    encoder=str(model_dir / "encoder.int8.onnx"),
-                    decoder=str(model_dir / "decoder.int8.onnx"),
-                    decoding_method="greedy_search",
-                    **shared_options,
-                )
-            else:
-                self._recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
-                    encoder=str(model_dir / "encoder-epoch-99-avg-1.int8.onnx"),
-                    decoder=str(model_dir / "decoder-epoch-99-avg-1.onnx"),
-                    joiner=str(model_dir / "joiner-epoch-99-avg-1.int8.onnx"),
-                    decoding_method="modified_beam_search",
-                    max_active_paths=4,
-                    model_type="zipformer",
-                    **shared_options,
-                )
+            self._recognizer = sherpa_onnx.OnlineRecognizer.from_paraformer(
+                encoder=str(model_dir / "encoder.int8.onnx"),
+                decoder=str(model_dir / "decoder.int8.onnx"),
+                decoding_method="greedy_search",
+                **shared_options,
+            )
 
     def create_session(
         self,

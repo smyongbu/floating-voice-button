@@ -46,14 +46,12 @@ LOCAL_MODELS_DIR = MODEL_CACHE_DIR
 
 SENSEVOICE_MODEL_ID = "sensevoice-small-int8"
 PARAFORMER_MODEL_ID = "paraformer-zh-small-int8"
-QWEN3_MODEL_ID = "qwen3-asr-0.6b-int8"
 FASTER_WHISPER_MODEL_ID = "faster-whisper-small"
 QWEN3_17_MODEL_ID = "qwen3-asr-1.7b-q5km"
 QWEN3_17_RESOURCE_ID = QWEN3_17_MODEL_ID
 QWEN3_17_FILENAME = "Qwen3-ASR-1.7B-Q5_K_M.gguf"
 MODEL_DISPLAY_ORDER = (
     FASTER_WHISPER_MODEL_ID,
-    QWEN3_MODEL_ID,
     QWEN3_17_MODEL_ID,
 )
 
@@ -106,48 +104,6 @@ LOCAL_MODELS: dict[str, dict[str, Any]] = {
         },
         "sha256": {
             "model.int8.onnx": "3ef6c19369b912f7caf3cef8e545c5ccd1a33d9d7ec792a46668dc41c4b229ec",
-        },
-    },
-    QWEN3_MODEL_ID: {
-        "id": QWEN3_MODEL_ID,
-        "name": "Qwen3-ASR 0.6B INT8",
-        "engine": "qwen3_asr",
-        "source_directory": "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25",
-        "required_files": [
-            "conv_frontend.onnx",
-            "encoder.int8.onnx",
-            "decoder.int8.onnx",
-            "tokenizer/merges.txt",
-            "tokenizer/vocab.json",
-            "tokenizer/tokenizer_config.json",
-        ],
-        "size_bytes": 982_000_000,
-        "capabilities": [
-            "普通话",
-            "粤语",
-            "吴语",
-            "闽南语",
-            "多种中文方言",
-            "30 多种语言",
-            "歌词与说唱",
-        ],
-        "summary": "兼顾多种语言、中文方言、歌词和说唱",
-        "language_support": "支持中文和英文，也支持多种语言与方言",
-        "hardware": {
-            "minimum": "4 核 64 位 CPU、8 GB 内存",
-            "recommended": "6 核以上 CPU、16 GB 内存",
-            "gpu": "不需要显卡；NVIDIA CUDA 可选，使用前需安装对应运行组件",
-            "note": "约 1 GB。最低与推荐配置为工程估算，不是官方硬性门槛；实际速度因 CPU 代际而异。",
-        },
-        "license": "Apache-2.0",
-        "download": {
-            "page": "https://k2-fsa.github.io/sherpa/onnx/qwen3-asr/pretrained.html",
-            "url": "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tree/main",
-        },
-        "sha256": {
-            "conv_frontend.onnx": "d22dc4423e0940e49884e903d2ea2f7e5567c14fc1aed97e4e26d6b8f208ef9e",
-            "encoder.int8.onnx": "60748d3e6744a57c9c91e1b17424a6c2990567e8adceb0783940c03ed98fa9d9",
-            "decoder.int8.onnx": "4f6885be5959ae26af3089d38ee7972c5fafbeeb1cf8d5e76eab6d8b61ca5771",
         },
     },
     FASTER_WHISPER_MODEL_ID: {
@@ -315,14 +271,6 @@ def _runtime_status(metadata: dict[str, Any]) -> tuple[bool, str]:
         return True, "运行组件可用。"
     if importlib.util.find_spec("sherpa_onnx") is None:
         return False, "缺少运行组件 sherpa-onnx。"
-    if engine == "qwen3_asr":
-        try:
-            import sherpa_onnx
-
-            if not hasattr(sherpa_onnx.OfflineRecognizer, "from_qwen3_asr"):
-                return False, "当前 sherpa-onnx 版本不支持 Qwen3-ASR，需要 1.13.4 或更高版本。"
-        except (ImportError, AttributeError):
-            return False, "无法加载 Qwen3-ASR 运行组件。"
     return True, "运行组件可用。"
 
 
@@ -685,21 +633,6 @@ class LocalModelRecognizer:
                     tokens=str(model_dir / "tokens.txt"),
                     num_threads=self.num_threads,
                     provider=self.provider,
-                )
-            elif engine == "qwen3_asr":
-                factory = getattr(sherpa_onnx.OfflineRecognizer, "from_qwen3_asr", None)
-                if factory is None:
-                    raise RuntimeError(
-                        "当前 sherpa-onnx 版本不支持 Qwen3-ASR，需要 1.13.4 或更高版本。"
-                    )
-                self._recognizer = factory(
-                    conv_frontend=str(model_dir / "conv_frontend.onnx"),
-                    encoder=str(model_dir / "encoder.int8.onnx"),
-                    decoder=str(model_dir / "decoder.int8.onnx"),
-                    tokenizer=str(model_dir / "tokenizer"),
-                    num_threads=self.num_threads,
-                    provider=self.provider,
-                    max_new_tokens=512,
                 )
             else:  # pragma: no cover
                 raise RuntimeError(f"暂不支持模型引擎：{engine}")

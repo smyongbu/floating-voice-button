@@ -8,11 +8,11 @@ from model_resource_groups import (
 
 
 class ModelResourceGroupTests(unittest.TestCase):
-    def test_all_five_visible_models_have_download_specs(self):
+    def test_all_three_visible_models_have_download_specs(self):
         groups = build_grouped_download_specs()
         self.assertEqual(set(groups), set(MODEL_FILES))
-        self.assertEqual(len(groups), 5)
-        self.assertEqual(sum(len(items) for items in groups.values()), 18)
+        self.assertEqual(len(groups), 3)
+        self.assertEqual(sum(len(items) for items in groups.values()), 8)
         resource_ids = [spec.resource_id for items in groups.values() for spec in items]
         self.assertEqual(len(resource_ids), len(set(resource_ids)))
         for model_id, specs in groups.items():

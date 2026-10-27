@@ -1,68 +1,45 @@
-name: Windows 编译
-
-on: workflow_dispatch
-
+name: Windows 三模型编译
+on:
+  workflow_dispatch:
+  push:
+    branches: [agent/windows-three-models]
+    paths: ["**", "!android-app/**"]
 permissions:
   contents: write
-
+concurrency:
+  group: windows-three-models
+  cancel-in-progress: false
 jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 60
-
     steps:
-      - name: 检出源码
-        uses: actions/checkout@v4
-
-      - name: 配置 Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
       - name: 安装依赖
-        shell: pwsh
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller==6.15.0
-
       - name: 运行测试
-        shell: pwsh
         run: python -m unittest discover -s tests -v
-
-      - name: 编译轻量升级版
-        shell: pwsh
-        run: python tools/build_windows.py --variant lite
-
-      - name: 定位交付文件
+      - name: 下载并还原已上传的三模型
+        run: python tools/windows_model_bundle.py build/cloud-models
+      - name: 编译三模型版本
         shell: pwsh
         run: |
-          $version = python -c "from tools.build_windows import APP_VERSION; print(APP_VERSION)"
-          $zipPath = Join-Path $PWD "发布版本\语点-Windows-$version-轻量升级版-不带模型.zip"
-          if (-not (Test-Path -LiteralPath $zipPath)) { throw "未找到编译产物：$zipPath" }
-          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "RELEASE_ZIP=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: 发布 GitHub Release
-        shell: pwsh
+          $env:VOICE_INPUT_MODEL_REPOSITORY = Join-Path $PWD 'build/cloud-models'
+          python tools/build_windows.py --variant first-install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $expected = python -c "from version import APP_VERSION; print(APP_VERSION)"
+          $info = (Get-Item -LiteralPath 'dist/语点/语点.exe').VersionInfo
+          if ($info.FileVersion -ne $expected -or $info.ProductVersion -ne $expected) { throw 'EXE版本不一致' }
+      - name: 核验包内模型并生成附件
+        run: python -m tools.prepare_windows_delivery
+      - name: 上传版本化安装包
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $notesFile = "release-notes.md"
-          @"
-          ## 语点 $env:RELEASE_VERSION
-
-          - 支持 Streaming Paraformer 与 Zipformer 实时显示文字。
-          - 支持 Faster-Whisper Small、Qwen3-ASR 0.6B INT8 与 Qwen3-ASR 1.7B Q5_K_M 整段识别。
-          - 移除识别后通用文字校正，保留模型原始输出。
-          - 轻量版不包含模型；正式版复用自己的跨版本模型缓存，不读取源码开发缓存。
-          - ZIP 内根文件夹和 EXE 文件版本均与源码版本一致。
-          - 压缩包附带 SHA-256 校验文件。
-          "@ | Set-Content -Encoding UTF8 $notesFile
-          gh release create $env:RELEASE_VERSION `
-            $env:RELEASE_ZIP `
-            "$env:RELEASE_ZIP.sha256" `
-            --target $env:GITHUB_SHA `
-            --title "语点 $env:RELEASE_VERSION" `
-            --notes-file $notesFile
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release upload voice-bundled-models-v1 发布版本/github/* --repo "$env:GITHUB_REPOSITORY"

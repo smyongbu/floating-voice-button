@@ -19,7 +19,7 @@ class LocalAsrTests(unittest.TestCase):
         self.addCleanup(self._frozen_patch.stop)
 
     def test_source_run_reads_shared_repository_without_using_local_cache(self):
-        source = Path("O:/程序/共享模型仓库/faster-whisper-small")
+        source = Path("D:/程序/共享模型仓库/faster-whisper-small")
         cache = Path("C:/Users/test/AppData/Local/FloatingVoiceButton/models/faster-whisper-small")
         with (
             patch.object(local_asr, "_running_frozen", return_value=False),
@@ -318,7 +318,6 @@ class LocalAsrTests(unittest.TestCase):
         self.assertEqual(
             {item["id"] for item in catalog},
             {
-                "qwen3-asr-0.6b-int8",
                 "faster-whisper-small",
                 "qwen3-asr-1.7b-q5km",
             },
@@ -528,11 +527,11 @@ class LocalAsrTests(unittest.TestCase):
                 patch.object(local_asr, "MODEL_SOURCE_ROOT", Path(source_dir)),
                 patch.object(local_asr, "LOCAL_MODELS_DIR", Path(target_dir)),
             ):
-                status = local_asr.get_local_model_status(local_asr.QWEN3_MODEL_ID)
+                status = local_asr.get_local_model_status(local_asr.FASTER_WHISPER_MODEL_ID)
         self.assertFalse(status["installed"])
         self.assertFalse(status["available"])
         self.assertEqual(status["status"], "未安装")
-        self.assertIn("decoder.int8.onnx", status["missing_files"])
+        self.assertIn("model.bin", status["missing_files"])
 
     def test_model_install_reuses_complete_local_copy(self):
         with tempfile.TemporaryDirectory() as source_dir, tempfile.TemporaryDirectory() as target_dir:

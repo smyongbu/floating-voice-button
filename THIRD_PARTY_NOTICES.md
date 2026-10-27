@@ -7,7 +7,7 @@
 - GGUF 来源：https://huggingface.co/handy-computer/Qwen3-ASR-1.7B-gguf
 - GGUF 固定提交：`92282af1610a2db19d66f2bef1e260f5deca782d`
 - 文件：`Qwen3-ASR-1.7B-Q5_K_M.gguf`
-- 用途：用户在 Windows 设置页选择相关功能时直接从原始模型仓库按需下载；不进入 Git、源码包或安装包。
+- 用途：用户在 Windows 设置页选择相关功能时直接从原始模型仓库按需下载；不进入 Git 或源码包；按用户要求，三模型首次安装版附带此权重。
 - 许可：Apache License 2.0。模型文件保留上游 GGUF 元数据；完整许可文本见 https://www.apache.org/licenses/LICENSE-2.0 。
 
 ## transcribe.cpp 0.2.1
@@ -95,3 +95,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+## Windows 三模型分发
+
+Streaming Paraformer 使用 Apache-2.0，来源及逐文件固定哈希见 tools/windows-models.json。Faster-Whisper Small 为 Systran/faster-whisper-small 的 CTranslate2 转换，沿用 OpenAI Whisper MIT 许可。权重未经本项目训练或修改；完整 Apache-2.0 与 OpenAI Whisper MIT 文本随包位于 licenses。

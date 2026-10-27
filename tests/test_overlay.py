@@ -204,6 +204,16 @@ class OverlayTests(unittest.TestCase):
         offset = (32 * 64 + 32) * 4
         self.assertEqual(pixels[offset:offset + 4], bytes((255, 255, 255, 255)))
 
+    def test_deep_surface_is_dark_with_clear_highlight_and_transparent_corners(self):
+        for size in (64, 72, 80):
+            image = overlay.render_deep_button_base(size, "#103E83")
+            self.assertEqual(image.getpixel((0, 0))[3], 0)
+            center = image.getpixel((size//2, size//2))
+            self.assertEqual(center[3], 255)
+            self.assertLess(center[0], 45)
+            self.assertGreater(center[2], center[0] + 50)
+            self.assertGreater(sum(image.getpixel((size//3,size//4))[:3]), sum(center[:3]))
+
     def test_recording_wave_has_three_colored_layers_at_all_sizes(self):
         for size in (64, 72, 96):
             with self.subTest(size=size):
@@ -251,16 +261,16 @@ class OverlayTests(unittest.TestCase):
         ring = render_waveform_layer(72, [0.6] * 7, shape_mix=0.0)
         middle = render_waveform_layer(72, [0.6] * 7, shape_mix=0.5)
         wave = render_waveform_layer(72, [0.6] * 7, shape_mix=1.0)
-        self.assertLessEqual(ring.getbbox()[2] - ring.getbbox()[0], 30)
+        self.assertLessEqual(ring.getbbox()[2] - ring.getbbox()[0], 34)
         self.assertIsNotNone(middle.getbbox())
         self.assertGreater(wave.getbbox()[2] - wave.getbbox()[0], 48)
 
-    def test_standby_layer_is_a_compact_gray_ring_independent_of_audio(self):
+    def test_standby_layer_is_a_compact_light_ring_independent_of_audio(self):
         silent = render_standby_layer(72, [0.0] * 7)
         active = render_standby_layer(72, [0.0, 0.1, 0.3, 1.0, 0.3, 0.1, 0.0])
         self.assertEqual(silent.tobytes(), active.tobytes())
         self.assertEqual(silent.getpixel((36, 36))[3], 0)
-        self.assertLessEqual(silent.getbbox()[2] - silent.getbbox()[0], 30)
+        self.assertLessEqual(silent.getbbox()[2] - silent.getbbox()[0], 34)
         visible = [pixel for pixel in silent.getdata() if pixel[3] >= 48]
         self.assertTrue(visible)
         self.assertTrue(
@@ -275,14 +285,14 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(symbol.getpixel((0, 0))[3], 0)
         self.assertEqual(symbol.getpixel((4, 4)), (255, 255, 255, 255))
 
-    def test_idle_and_standby_both_use_the_confirmed_gray_ring(self):
+    def test_idle_and_standby_both_use_the_confirmed_light_ring(self):
         transparent = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         for state in ("idle", "standby"):
             with self.subTest(state=state):
                 window = self.make_visual_window(state)
                 with (
                     patch.object(
-                        overlay, "render_glass_button_base", return_value=transparent
+                        overlay, "render_deep_button_base", return_value=transparent
                     ),
                     patch.object(
                         overlay, "render_waveform_layer", return_value=transparent
@@ -298,7 +308,7 @@ class OverlayTests(unittest.TestCase):
         window = self.make_visual_window("busy")
         with (
             patch.object(
-                overlay, "render_glass_button_base", return_value=transparent
+                overlay, "render_deep_button_base", return_value=transparent
             ),
             patch.object(overlay, "extract_light_symbol") as extract_symbol,
             patch.object(
@@ -314,7 +324,7 @@ class OverlayTests(unittest.TestCase):
         window = self.make_visual_window("recording")
         with (
             patch.object(
-                overlay, "render_glass_button_base", return_value=transparent
+                overlay, "render_deep_button_base", return_value=transparent
             ),
             patch.object(
                 overlay, "render_recording_halo", return_value=transparent
@@ -469,7 +479,7 @@ class OverlayTests(unittest.TestCase):
             return Image.new("RGBA", (64, 64), (0, 0, 0, 0))
 
         with (
-            patch.object(overlay, "render_glass_button_base", side_effect=assert_unlocked),
+            patch.object(overlay, "render_deep_button_base", side_effect=assert_unlocked),
             patch.object(overlay, "extract_light_symbol", side_effect=assert_unlocked),
         ):
             window._render()

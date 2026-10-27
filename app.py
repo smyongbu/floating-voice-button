@@ -705,12 +705,10 @@ class VoiceButtonApp:
                     self.transcript_window.hide()
                 old_recognition = (
                     previous.get("recognition_engine"),
-                    previous.get("fallback_model"),
                     previous.get("local_asr_device"),
                 )
                 new_recognition = (
                     updated.get("recognition_engine"),
-                    updated.get("fallback_model"),
                     updated.get("local_asr_device"),
                 )
                 if new_recognition != old_recognition:
@@ -1130,16 +1128,10 @@ class VoiceButtonApp:
                     op, selected.source, len(live_result.text), len(text),
                 )
                 text = selected.text
-            if result.fallback_used:
-                self.run_log.info(
-                    "操作进度 | 编号=%s | 阶段=在线识别瞬时失败并已回退 | 请求引擎=%s | 实际引擎=%s",
-                    op, result.requested_engine, result.actual_engine,
-                )
-            else:
-                self.run_log.info(
-                    "操作进度 | 编号=%s | 阶段=语音识别完成 | 实际引擎=%s",
-                    op, result.actual_engine,
-                )
+            self.run_log.info(
+                "操作进度 | 编号=%s | 阶段=语音识别完成 | 实际引擎=%s",
+                op, result.actual_engine,
+            )
             if not text:
                 raise RuntimeError("没有识别到有效语音，请重新录制。")
             self.run_log.info(

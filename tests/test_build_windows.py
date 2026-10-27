@@ -59,7 +59,7 @@ class WindowsBuildTests(unittest.TestCase):
             / "workflows"
             / "windows-release.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn("python tools/build_windows.py --variant lite", workflow)
+        self.assertIn("python tools/build_windows.py --variant first-install", workflow)
         self.assertNotIn("inputs.version", workflow)
         self.assertNotIn("pyinstaller --noconfirm", workflow)
 

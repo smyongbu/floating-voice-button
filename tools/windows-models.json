@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "id": "qwen3-asr-1.7b-gguf-q5-k-m",
+      "name": "Qwen3-ASR 1.7B Q5_K_M",
+      "version": "handy-computer/Qwen3-ASR-1.7B-gguf@92282af1610a2db19d66f2bef1e260f5deca782d",
+      "format": "GGUF",
+      "source": "https://huggingface.co/handy-computer/Qwen3-ASR-1.7B-gguf",
+      "directory": "qwen3-asr-1.7b-gguf/92282af1610a2db19d66f2bef1e260f5deca782d",
+      "files": [
+        {
+          "path": "Qwen3-ASR-1.7B-Q5_K_M.gguf",
+          "bytes": 1517290464,
+          "sha256": "034c557fe92ff8fcd9a9c041cbdaad347be0a86a58d3a348f63cf3f0180879d0",
+          "assets": [
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part001",
+              "bytes": 67108864,
+              "sha256": "96a71fc24e0a6c62f8ac6b901e92f915a9e40a533ab7b32c5f3a7a421b55eeff"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part002",
+              "bytes": 67108864,
+              "sha256": "2df33d05f1226239c4b0efdf1c2aeb673af7c964dfa07899090c47039af38d21"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part003",
+              "bytes": 67108864,
+              "sha256": "b7543d80590633f0d0a77c9c005f73041f875e8224adc68fb8faf9a99bf41154"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part004",
+              "bytes": 67108864,
+              "sha256": "e835467321f8449d659f82b9fd29bff77798a70fcf06851b738a02acc0cbbca8"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part005",
+              "bytes": 67108864,
+              "sha256": "340db25d2c5954f0279742568ca86e63516d0723724531019e59dae35b37f986"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part006",
+              "bytes": 67108864,
+              "sha256": "fce6f8ffa5957dd556446685ca44d72d15df47dd693983aad8e4b801c84dd23a"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part007",
+              "bytes": 67108864,
+              "sha256": "24c50556a7b50bdf67ccb43da9d42ad0231671fd96f58792bc20110e16878b6c"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part008",
+              "bytes": 67108864,
+              "sha256": "2ceff57d9591aa71c206ae1fc224c6d38c1d974544e2b73807085481127feba3"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part009",
+              "bytes": 67108864,
+              "sha256": "a4f60ffddc0f49f0965379283f6a3698a7e7e64f915e6874311afbfca8768035"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part010",
+              "bytes": 67108864,
+              "sha256": "a60530545da212d3e8971551a97ea18f5973fc962a320ec09a95ebac2baa55a4"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part011",
+              "bytes": 67108864,
+              "sha256": "856b62fe59bb94363d552469df4e055a7f87c60beb05e02becdd14d9065ccab9"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part012",
+              "bytes": 67108864,
+              "sha256": "7c68b8ac43a391afd6e4112b3986a0fa8803d0a019c399d0e53409501d3e9899"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part013",
+              "bytes": 67108864,
+              "sha256": "6bde59f9f3e5cf6cf37ad6c9163847156553380eec794954785156c412bc9271"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part014",
+              "bytes": 67108864,
+              "sha256": "e161d129297cfe9d2ee5df260c6c55cd151476e1367d9886e4e9ad848ccf21d6"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part015",
+              "bytes": 67108864,
+              "sha256": "ac76aa8be4974bf3aae92ad70d44b804456d6c0489c28b51d321ae88a57f986c"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part016",
+              "bytes": 67108864,
+              "sha256": "f9d3adcd0183326b8af0cb28a9b677b868e5b89fc066c1865abeb37e74209f50"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part017",
+              "bytes": 67108864,
+              "sha256": "9c78055c46fa3bfcf34948cea01cf9049c5e34d4a3dd27ffc46d4679a1c7daaa"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part018",
+              "bytes": 67108864,
+              "sha256": "03b6000945ca75e50bb85aafb62e6e4de502a0b092e4c47b445e3b1e576c4cc7"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part019",
+              "bytes": 67108864,
+              "sha256": "af26efd4186afb998a45440dfcfd7449e902f08531a944155ce327498d5e6627"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part020",
+              "bytes": 67108864,
+              "sha256": "695c0789b6b2089990a8d8a3be170d41454c4afbe9487f17b8506a79d49938bb"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part021",
+              "bytes": 67108864,
+              "sha256": "fec93d3c7f0aceb99f5769b197118487f66065be59217d93c594df0d512fd161"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part022",
+              "bytes": 67108864,
+              "sha256": "3a91390d79096d1f37fad73b4c720fb8370be339c029e6d3cfb48425f8f1167d"
+            },
+            {
+              "name": "qwen3-asr-1.7b-gguf-q5-k-m--Qwen3-ASR-1.7B-Q5_K_M.gguf.part023",
+              "bytes": 40895456,
+              "sha256": "78b1104f4b4e642d9f3c911460c2f8523cfe1e286d869cde118a1b5e2565cc91"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "faster-whisper-small",
+      "name": "Faster-Whisper Small",
+      "purpose": "资料助手 Windows 版本机离线整段语音识别",
+      "status": "integrated",
+      "version": "Systran/faster-whisper-small@2ec96c5472da50d38d40c0cfe0602af2e94b4c8a",
+      "format": "CTranslate2",
+      "license": "MIT",
+      "upstreamRepository": "Systran/faster-whisper-small",
+      "upstreamRevision": "2ec96c5472da50d38d40c0cfe0602af2e94b4c8a",
+      "source": "https://huggingface.co/Systran/faster-whisper-small",
+      "directory": "faster-whisper-small",
+      "sizeBytes": 486212372,
+      "files": [
+        {
+          "path": "config.json",
+          "bytes": 2370,
+          "sha256": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+          "assets": [
+            {
+              "name": "faster-whisper-small--config.json.part001",
+              "bytes": 2370,
+              "sha256": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828"
+            }
+          ]
+        },
+        {
+          "path": "model.bin",
+          "bytes": 483546902,
+          "sha256": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+          "assets": [
+            {
+              "name": "faster-whisper-small--model.bin.part001",
+              "bytes": 67108864,
+              "sha256": "d3f1fee406756e2bd4e5c086c87ce4a935072a97f6297dd356979b4bd9636c27"
+            },
+            {
+              "name": "faster-whisper-small--model.bin.part002",
+              "bytes": 67108864,
+              "sha256": "6b5dc3b33e3f29d28a537f77f421f9315cd0c3b62d26187a9aa23a9a219251f6"
+            },
+            {
+              "name": "faster-whisper-small--model.bin.part003",
+              "bytes": 67108864,
+              "sha256": "69418ad962ee28a9af5d4f0dc4d40a74fcac4faa594a476ecac927038824d425"
+            },
+            {
+              "name": "faster-whisper-small--model.bin.part004",
+              "bytes": 67108864,
+              "sha256": "8fd814894034752200916c45f3d1b065464f95e2c831311f7a1636b56ff9b2ab"
+            },
+            {
+              "name": "faster-whisper-small--model.bin.part005",
+              "bytes": 67108864,
+              "sha256": "311456b171b8a1b7bdd1fd66f88876e216bd26885e374a31fd56fb5400ca1980"
+            },
+            {
+              "name": "faster-whisper-small--model.bin.part006",
+              "bytes": 67108864,
+              "sha256": "92224d06d5ff253f90f0ed8692cadc2ba7376717abefd36cfa6f5ffbce557cb5"
+            },
+            {
+              "name": "faster-whisper-small--model.bin.part007",
+              "bytes": 67108864,
+              "sha256": "88ed756008e09fce0aaf97fd6f878dfdce65a0b82b502f0518f99cb9b256a12e"
+            },
+            {
+              "name": "faster-whisper-small--model.bin.part008",
+              "bytes": 13784854,
+              "sha256": "ee92c4ffbdea53deba6211da8ac34d223f8de7064378916e258b6f42fdbb53a5"
+            }
+          ]
+        },
+        {
+          "path": "tokenizer.json",
+          "bytes": 2203239,
+          "sha256": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+          "assets": [
+            {
+              "name": "faster-whisper-small--tokenizer.json.part001",
+              "bytes": 2203239,
+              "sha256": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab"
+            }
+          ]
+        },
+        {
+          "path": "vocabulary.txt",
+          "bytes": 459861,
+          "sha256": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913",
+          "assets": [
+            {
+              "name": "faster-whisper-small--vocabulary.txt.part001",
+              "bytes": 459861,
+              "sha256": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "streaming-paraformer-bilingual-zh-en",
+      "name": "Streaming Paraformer 中英双语实时模型",
+      "version": "sherpa-onnx-asr-models@2024-03-10",
+      "format": "ONNX INT8 + FP32",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2",
+      "sourceArchive": {
+        "bytes": 1047319737,
+        "sha256": "5462a1fce42693deae572af1e8c4687124b12aa85fe61ff4d3168bb5280e205f"
+      },
+      "directory": "sherpa-onnx-streaming-paraformer-bilingual-zh-en",
+      "files": [
+        {
+          "sha256": "f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f",
+          "path": "decoder.int8.onnx",
+          "bytes": 71664561,
+          "assets": [
+            {
+              "name": "streaming-paraformer-bilingual-zh-en--decoder.int8.onnx",
+              "bytes": 71664561,
+              "sha256": "f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f"
+            }
+          ]
+        },
+        {
+          "sha256": "81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a",
+          "path": "encoder.int8.onnx",
+          "bytes": 165462184,
+          "assets": [
+            {
+              "name": "streaming-paraformer-bilingual-zh-en--encoder.int8.onnx",
+              "bytes": 165462184,
+              "sha256": "81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a"
+            }
+          ]
+        },
+        {
+          "sha256": "59aba8873a2ed1e122c25fee421e25f283b63290efbde85c1f01a853d83cb6e6",
+          "path": "tokens.txt",
+          "bytes": 75756,
+          "assets": [
+            {
+              "name": "streaming-paraformer-bilingual-zh-en--tokens.txt",
+              "bytes": 75756,
+              "sha256": "59aba8873a2ed1e122c25fee421e25f283b63290efbde85c1f01a853d83cb6e6"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -7,13 +7,11 @@ from typing import Any
 from local_asr import (
     FASTER_WHISPER_MODEL_ID,
     QWEN3_17_MODEL_ID,
-    QWEN3_MODEL_ID,
     _model_directories,
 )
 from model_download import DownloadSpec, ModelDownloadManager
 from realtime_asr import (
     DEFAULT_REALTIME_MODEL,
-    ZIPFORMER_REALTIME_MODEL,
     _model_paths,
 )
 
@@ -28,16 +26,6 @@ MODEL_FILES: dict[str, dict[str, Any]] = {
             "tokens.txt": (75_756, "59aba8873a2ed1e122c25fee421e25f283b63290efbde85c1f01a853d83cb6e6", "tokens.txt"),
         },
     },
-    ZIPFORMER_REALTIME_MODEL: {
-        "version": "csukuangfj/zipformer@8a7306b4d4d40c3cb1bdb80e8f2f605167570af3",
-        "base": "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/",
-        "files": {
-            "encoder-epoch-99-avg-1.int8.onnx": (42_980_793, "db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb", "exp/32/encoder-epoch-99-avg-1.int8.onnx"),
-            "decoder-epoch-99-avg-1.onnx": (13_877_276, "89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906", "exp/32/decoder-epoch-99-avg-1.onnx"),
-            "joiner-epoch-99-avg-1.int8.onnx": (3_228_485, "bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9", "exp/32/joiner-epoch-99-avg-1.int8.onnx"),
-            "tokens.txt": (56_317, "a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3", "data/lang_char_bpe/tokens.txt"),
-        },
-    },
     FASTER_WHISPER_MODEL_ID: {
         "version": "Systran/faster-whisper-small@2ec96c5472da50d38d40c0cfe0602af2e94b4c8a",
         "base": "https://huggingface.co/Systran/faster-whisper-small/resolve/2ec96c5472da50d38d40c0cfe0602af2e94b4c8a/",
@@ -46,18 +34,6 @@ MODEL_FILES: dict[str, dict[str, Any]] = {
             "model.bin": (483_546_902, "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671", "model.bin"),
             "tokenizer.json": (2_203_239, "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab", "tokenizer.json"),
             "vocabulary.txt": (459_861, "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913", "vocabulary.txt"),
-        },
-    },
-    QWEN3_MODEL_ID: {
-        "version": "csukuangfj2/qwen3-asr-0.6b@2cc50d1abfe4d4f2df8d71f536d108bb40f943d2",
-        "base": "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/2cc50d1abfe4d4f2df8d71f536d108bb40f943d2/",
-        "files": {
-            "conv_frontend.onnx": (44_148_281, "d22dc4423e0940e49884e903d2ea2f7e5567c14fc1aed97e4e26d6b8f208ef9e", "conv_frontend.onnx"),
-            "decoder.int8.onnx": (755_914_231, "4f6885be5959ae26af3089d38ee7972c5fafbeeb1cf8d5e76eab6d8b61ca5771", "decoder.int8.onnx"),
-            "encoder.int8.onnx": (182_491_662, "60748d3e6744a57c9c91e1b17424a6c2990567e8adceb0783940c03ed98fa9d9", "encoder.int8.onnx"),
-            "tokenizer/merges.txt": (1_671_853, "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5", "tokenizer/merges.txt"),
-            "tokenizer/tokenizer_config.json": (12_487, "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c", "tokenizer/tokenizer_config.json"),
-            "tokenizer/vocab.json": (2_776_833, "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910", "tokenizer/vocab.json"),
         },
     },
     QWEN3_17_MODEL_ID: {
@@ -71,7 +47,7 @@ MODEL_FILES: dict[str, dict[str, Any]] = {
 
 
 def _target_directory(model_id: str) -> Path:
-    if model_id in (DEFAULT_REALTIME_MODEL, ZIPFORMER_REALTIME_MODEL):
+    if model_id == DEFAULT_REALTIME_MODEL:
         _normalized, _spec, source, local = _model_paths(model_id)
     else:
         source, local = _model_directories(model_id)
