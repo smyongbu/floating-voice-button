@@ -185,3 +185,5 @@ files/logs/错误.log
 Windows 0.16.12 与 Android 0.15.0 的正式更新统一整合至 `main`，保留各自版本和已验证产物。安卓工作流仅由 `main` 下安卓源码／构建配置的变化触发，纯文档更新不编译；资源上传脚本以 `main` 为新资源标签的默认来源。旧分支保留为历史，不再承载正式更新。项目长期约定见根目录 `AGENTS.md`。AI规划服务不可用，本轮需求与合并证据尚未同步。
 
 合并快照通过 341 项 Windows 测试、11 项安卓资源测试、两端 JavaScript 语法及工作流 YAML 检查。两端运行源码与各自成功云构建版本逐文件一致；既有构建证据：[Windows 40465037539](https://github.com/smyongbu/floating-voice-button/actions/runs/40465037539)、[Android 40455142929](https://github.com/smyongbu/floating-voice-button/actions/runs/40455142929)。本轮使用 `[skip ci]` 跳过同版本重复打包，后续正式代码更新按 main 下的平台路径触发。
+
+2026-10-27：首页按 Windows／Android 分区，顶部提供各平台版本、下载和系统要求；补充 Windows 按钮设置与本地模型页的正式前端预览截图，保留安卓深浅主题预览。Windows 原生截图工具未获准访问对应 Python 窗口，故配图明确注明浏览器预览与示例状态，不作为真机或识别效果证据。Windows 三个下载分卷逐项核对远程附件存在；此次仅文档和配图更新，不重新编译。AI规划服务不可用时，本轮首页更正与验证证据尚未同步。
