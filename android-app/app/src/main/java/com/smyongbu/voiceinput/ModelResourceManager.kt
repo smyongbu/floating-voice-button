@@ -3,6 +3,7 @@ package com.smyongbu.voiceinput
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -34,16 +35,12 @@ data class ModelResourceState(
 
 object ModelResourceManager {
     const val STREAMING_PARAFORMER_ID = "streaming-paraformer-bilingual-zh-en"
-    const val ZIPFORMER_ID = "zipformer-bilingual"
-    const val QWEN_06B_ID = "qwen3-asr-0.6b-int8"
     const val FASTER_WHISPER_SMALL_ID = "faster-whisper-small-gguf-q8-0"
     const val FASTER_WHISPER_SMALL_FILE = "whisper-small-Q8_0.gguf"
     const val QWEN_17B_ID = "qwen3-asr-1.7b-gguf-q5-k-m"
     const val QWEN_17B_FILE = "Qwen3-ASR-1.7B-Q5_K_M.gguf"
     val RECOGNITION_RESOURCE_IDS = setOf(
         STREAMING_PARAFORMER_ID,
-        ZIPFORMER_ID,
-        QWEN_06B_ID,
         FASTER_WHISPER_SMALL_ID,
         QWEN_17B_ID,
     )
@@ -112,82 +109,6 @@ object ModelResourceManager {
             ),
         ),
         BundleSpec(
-            id = ZIPFORMER_ID,
-            name = "Zipformer",
-            purpose = "边说边显示中英文和中英混说识别文字",
-            version = "2024-03-20-exp32-int8",
-            files = listOf(
-                FileSpec(
-                    "encoder-epoch-99-avg-1.int8.onnx",
-                    "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/exp/32/encoder-epoch-99-avg-1.int8.onnx",
-                    42_980_793,
-                    "db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb",
-                ),
-                FileSpec(
-                    "decoder-epoch-99-avg-1.onnx",
-                    "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/exp/32/decoder-epoch-99-avg-1.onnx",
-                    13_877_276,
-                    "89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906",
-                ),
-                FileSpec(
-                    "joiner-epoch-99-avg-1.int8.onnx",
-                    "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/exp/32/joiner-epoch-99-avg-1.int8.onnx",
-                    3_228_485,
-                    "bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9",
-                ),
-                FileSpec(
-                    "tokens.txt",
-                    "https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t/resolve/8a7306b4d4d40c3cb1bdb80e8f2f605167570af3/data/lang_char_bpe/tokens.txt",
-                    56_317,
-                    "a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3",
-                ),
-            ),
-        ),
-        BundleSpec(
-            id = QWEN_06B_ID,
-            name = "Qwen3-ASR 0.6B INT8",
-            purpose = "停止后生成中英文和中英混说最终文字",
-            version = "2026-03-25-int8",
-            files = listOf(
-                FileSpec(
-                    "conv_frontend.onnx",
-                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/conv_frontend.onnx",
-                    44_148_281,
-                    "d22dc4423e0940e49884e903d2ea2f7e5567c14fc1aed97e4e26d6b8f208ef9e",
-                ),
-                FileSpec(
-                    "encoder.int8.onnx",
-                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/encoder.int8.onnx",
-                    182_491_662,
-                    "60748d3e6744a57c9c91e1b17424a6c2990567e8adceb0783940c03ed98fa9d9",
-                ),
-                FileSpec(
-                    "decoder.int8.onnx",
-                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/decoder.int8.onnx",
-                    755_914_231,
-                    "4f6885be5959ae26af3089d38ee7972c5fafbeeb1cf8d5e76eab6d8b61ca5771",
-                ),
-                FileSpec(
-                    "tokenizer/merges.txt",
-                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/tokenizer/merges.txt",
-                    1_671_853,
-                    "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
-                ),
-                FileSpec(
-                    "tokenizer/tokenizer_config.json",
-                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/tokenizer/tokenizer_config.json",
-                    12_487,
-                    "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
-                ),
-                FileSpec(
-                    "tokenizer/vocab.json",
-                    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve/68818b2313fe77bd06f6a7c5068ff3ef59d02b8a/tokenizer/vocab.json",
-                    2_776_833,
-                    "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
-                ),
-            ),
-        ),
-        BundleSpec(
             id = FASTER_WHISPER_SMALL_ID,
             name = "Faster-Whisper Small",
             purpose = "停止后生成完整的最终识别文字",
@@ -225,6 +146,8 @@ object ModelResourceManager {
     private lateinit var app: Context
     private lateinit var logger: AppLogger
     private lateinit var bundles: List<BundleSpec>
+    private val bundledInstallActive = AtomicBoolean(false)
+    private var bundledIds = emptySet<String>()
 
     fun init(context: Context) {
         if (::app.isInitialized) return
@@ -237,7 +160,28 @@ object ModelResourceManager {
                 fallbackBundles
             }
             rootDirectory().mkdirs()
+            // 已停用模型只清理本应用私有副本，不触及其他资源。
+            val retired = safeFile(rootDirectory(), "qwen3-asr-0.6b-int8")
+            if (retired.exists()) {
+                runCatching { check(retired.deleteRecursively()) { "旧模型清理失败" } }
+                    .onSuccess { logger.info("已清理停用的 0.6B 模型", "model-cleanup") }
+                    .onFailure { logger.error("停用模型清理失败，下次启动重试", it, "model-cleanup") }
+            }
             bundles.filter(::isInstalled).forEach(::cleanupOldVersions)
+            if (BuildConfig.BUNDLED_MODELS) {
+                val metadata = app.assets.open("bundled-models.json").bufferedReader().use { JSONObject(it.readText()) }
+                check(metadata.getString("variant") == "three-models") { "内置模型变体错误" }
+                val resources = metadata.getJSONArray("resources")
+                bundledIds = (0 until resources.length()).map { index ->
+                    val resource = resources.getJSONObject(index)
+                    val id = resource.getString("id")
+                    val spec = bundle(id) ?: error("内置资源不在正式清单中")
+                    check(resource.getString("version") == spec.version) { "内置资源版本不一致" }
+                    id
+                }.toSet()
+                check(bundledIds == RECOGNITION_RESOURCE_IDS) { "内置模型清单不完整" }
+                installBundledModels()
+            }
         }
     }
 
@@ -270,6 +214,10 @@ object ModelResourceManager {
         val spec = bundle(id) ?: return
         if (isInstalled(spec)) {
             notifyChanged()
+            return
+        }
+        if (id in bundledIds) {
+            installBundledModels()
             return
         }
         tasks[id]?.let {
@@ -349,6 +297,48 @@ object ModelResourceManager {
     }
 
     fun refresh() = notifyChanged()
+
+    private fun installBundledModels() {
+        if (!bundledInstallActive.compareAndSet(false, true)) return
+        taskExecutor.execute {
+            try {
+                bundles.filter { it.id in bundledIds && !isInstalled(it) }.forEach { spec ->
+                    val operation = "bundled-${spec.id}"
+                    try {
+                        runtimeStates[spec.id] = RuntimeState("installing")
+                        notifyChanged()
+                        logger.info("开始安装内置模型，资源=${spec.id}", operation)
+                        var lastUpdate = 0L
+                        spec.files.forEach { file ->
+                            val target = safeFile(versionDirectory(spec), file.relativePath)
+                            if (!target.exists() && rootDirectory().usableSpace < file.bytes + MINIMUM_FREE_BYTES) {
+                                throw IOException("存储空间不足，无法安装内置模型")
+                            }
+                            BundledModelFile.install(target, file.bytes, file.sha256, {
+                                app.assets.open("bundled-models/${spec.id}/${spec.version}/${file.relativePath}")
+                            }) { written ->
+                                val now = SystemClock.elapsedRealtime()
+                                if (now - lastUpdate >= 250 || written == file.bytes) {
+                                    lastUpdate = now
+                                    notifyChanged()
+                                }
+                            }
+                        }
+                        writeMarker(spec)
+                        cleanupOldVersions(spec)
+                        runtimeStates.remove(spec.id)
+                        logger.info("内置模型校验并安装完成，资源=${spec.id}", operation)
+                    } catch (error: Exception) {
+                        runtimeStates[spec.id] = RuntimeState("error", error = "内置模型安装失败，请释放空间后重试。")
+                        logger.error("内置模型安装失败，资源=${spec.id}", error, operation)
+                    }
+                    notifyChanged()
+                }
+            } finally {
+                bundledInstallActive.set(false)
+            }
+        }
+    }
 
     private fun downloadBundle(spec: BundleSpec, task: DownloadTask) {
         val operationId = "model-${spec.id}-${System.currentTimeMillis().toString(36)}"
