@@ -2,8 +2,8 @@ name: Windows 三模型编译
 on:
   workflow_dispatch:
   push:
-    branches: [agent/windows-three-models]
-    paths: ["**", "!android-app/**"]
+    branches: [main]
+    paths: ["*.py", "*.vbs", "*.cmd", "*.ps1", "web/**", "assets/**", "tools/**", "tests/**", "requirements*.txt", "config.example.json", ".github/workflows/windows-release.yml"]
 permissions:
   contents: write
 env:

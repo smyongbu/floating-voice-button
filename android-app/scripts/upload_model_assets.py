@@ -121,7 +121,7 @@ def main() -> None:
     release = client.request("GET", endpoint + "/tags/" + MODEL_TAG)
     if release is None:
         release = client.request("POST", endpoint, {
-            "tag_name": MODEL_TAG, "target_commitish": "agent/update-voice-recognition",
+            "tag_name": MODEL_TAG, "target_commitish": "main",
             "name": "语点三模型构建资源 v1", "prerelease": True, "draft": False,
             "body": "用于语点自带三模型安装包的构建资源。文件版本、来源、许可证、大小与 SHA-256 见 bundled-models.json；不含录音、历史或凭据。",
         })

@@ -179,3 +179,9 @@ files/logs/错误.log
 ## GitHub 首页维护
 
 2026-10-27：首页精简为软件介绍、安卓下载、功能和首次使用，配两张项目权威预览的局部截图并明确来源；完整开发说明保留在本文。首页正文维护于 `docs/仓库首页.md`，发布时只映射到远程默认分支 `README.md` 并同步 `docs/screenshots` 下图片，不覆盖本机共用仓库中正在修改的 Windows README，不夹带 Windows 源码。此次仅文档更新，不重新编译 APK。AI规划服务仍无法连接，本轮文档需求与更新证据尚未同步。
+
+## 主线同步（2026-10-27）
+
+Windows 0.16.12 与 Android 0.15.0 的正式更新统一整合至 `main`，保留各自版本和已验证产物。安卓工作流仅由 `main` 下安卓源码／构建配置的变化触发，纯文档更新不编译；资源上传脚本以 `main` 为新资源标签的默认来源。旧分支保留为历史，不再承载正式更新。项目长期约定见根目录 `AGENTS.md`。AI规划服务不可用，本轮需求与合并证据尚未同步。
+
+合并快照通过 341 项 Windows 测试、11 项安卓资源测试、两端 JavaScript 语法及工作流 YAML 检查。两端运行源码与各自成功云构建版本逐文件一致；既有构建证据：[Windows 40465037539](https://github.com/smyongbu/floating-voice-button/actions/runs/40465037539)、[Android 40455142929](https://github.com/smyongbu/floating-voice-button/actions/runs/40455142929)。本轮使用 `[skip ci]` 跳过同版本重复打包，后续正式代码更新按 main 下的平台路径触发。

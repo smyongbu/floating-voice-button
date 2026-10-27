@@ -2,8 +2,8 @@ name: 安卓三模型构建
 
 on:
   push:
-    branches: [agent/update-voice-recognition]
-    paths: ["android-app/**", ".github/workflows/android.yml"]
+    branches: [main]
+    paths: ["android-app/**", "!android-app/docs/**", "!android-app/**/*.md", ".github/workflows/android.yml"]
   workflow_dispatch:
 
 concurrency:

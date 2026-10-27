@@ -37,4 +37,4 @@
 
 ---
 
-[安卓源码与构建说明](https://github.com/smyongbu/floating-voice-button/tree/agent/update-voice-recognition/android-app) · [问题反馈](https://github.com/smyongbu/floating-voice-button/issues)
+[Windows 使用与开发说明](https://github.com/smyongbu/floating-voice-button/blob/main/docs/windows.md) · [安卓源码与构建说明](https://github.com/smyongbu/floating-voice-button/tree/main/android-app) · [问题反馈](https://github.com/smyongbu/floating-voice-button/issues)
