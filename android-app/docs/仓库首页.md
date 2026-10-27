@@ -1,6 +1,18 @@
 # 语点
 
-Windows 与 Android 双端悬浮语音输入工具。边说边显示文字，停止后生成最终结果；本地模型识别时，录音不上传。
+**把语音输入放在手边的一颗悬浮球里。** Windows 与 Android 双端可用：点一下开始说话，再点一下停止；边说边显示文字，本地模型识别时录音不上传。
+
+## 主打功能：悬浮球语音输入
+
+无需来回切换到录音页面，悬浮球可以停在当前软件上方，拖到顺手的位置。
+
+- **Windows：说完直接输入。** 把光标放到输入处，点击球或按 `Ctrl+Alt+Space` 开始／停止；最终文字默认自动输入原软件，也可设置为仅复制。
+- **Android：跨应用随手录音。** 开启悬浮权限后，点击球开始／停止，拖动后自动贴边；识别文字在球旁显示，点击文字框即可复制。
+- **看得见的录音状态。** 待机与收音有不同视觉反馈，录音声波随音量变化；文字同时实时更新。
+
+<img src="https://raw.githubusercontent.com/smyongbu/floating-voice-button/main/docs/screenshots/floating-ball-demo.gif" width="800" alt="Windows 悬浮球动画：待机浅白圆环展开成录音时的三层浅青光带，停止后收回圆环">
+
+上图复用 Windows 正式球体绘制代码，放大演示待机 → 录音 → 停止的形变，音量为模拟信号，非实录；安卓采用玻璃球外观。动画播放两遍后停止，也可[查看静态三状态图](https://raw.githubusercontent.com/smyongbu/floating-voice-button/main/docs/screenshots/floating-ball-states.png)。
 
 ## 选择你的版本
 
