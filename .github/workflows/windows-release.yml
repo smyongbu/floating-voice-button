@@ -6,6 +6,9 @@ on:
     paths: ["**", "!android-app/**"]
 permissions:
   contents: write
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
 concurrency:
   group: windows-three-models
   cancel-in-progress: false
