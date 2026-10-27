@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 from bundle_models import APP_ROOT, asset_name, catalog, verify
@@ -62,7 +63,10 @@ class GitHub:
             if existing["state"] == "uploaded" and existing["size"] == file.stat().st_size and expected_hash and existing.get("digest") == "sha256:" + expected_hash:
                 print("复用已校验附件：" + file.name, flush=True)
                 return
-            raise RuntimeError("同名附件已存在且尚未确认哈希，请检查：" + file.name)
+            if existing["state"] != "uploaded":
+                self.request("DELETE", f"/repos/{REPOSITORY}/releases/assets/{existing['id']}")
+            else:
+                raise RuntimeError("同名附件已存在且尚未确认哈希，请检查：" + file.name)
         size = file.stat().st_size
         if size >= 2 * 1024**3:
             raise ValueError("附件超过 GitHub 2 GiB 限制")
@@ -103,9 +107,15 @@ def main() -> None:
     args = parser.parse_args()
     import hashlib
     resources = catalog()
+    distribution = json.loads((args.directory / "bundled-models.json").read_text(encoding="utf-8")).get("releaseFiles", {})
+    uploads = []
     for resource in resources:
         for item in resource["files"]:
-            verify(args.directory / asset_name(resource, item), item)
+            name = asset_name(resource, item)
+            for asset in distribution.get(name, [{"name": name, **item}]):
+                file = args.directory / asset["name"]
+                verify(file, asset)
+                uploads.append((file, asset["sha256"]))
     client = GitHub()
     endpoint = f"/repos/{REPOSITORY}/releases"
     release = client.request("GET", endpoint + "/tags/" + MODEL_TAG)
@@ -116,9 +126,24 @@ def main() -> None:
             "body": "用于语点自带三模型安装包的构建资源。文件版本、来源、许可证、大小与 SHA-256 见 bundled-models.json；不含录音、历史或凭据。",
         })
     print("模型资源页：" + release["html_url"], flush=True)
-    for resource in resources:
-        for item in resource["files"]:
-            client.upload(release["id"], args.directory / asset_name(resource, item), item["sha256"])
+    # 只清理本轮大文件上传中断留下的未完成占位附件。
+    existing_assets = client.request("GET", endpoint + f"/{release['id']}/assets?per_page=100")
+    for asset in existing_assets:
+        if asset["name"] in distribution and asset["state"] != "uploaded":
+            client.request("DELETE", f"/repos/{REPOSITORY}/releases/assets/{asset['id']}")
+    def upload_one(entry):
+        file, digest = entry
+        for attempt in range(3):
+            try:
+                client.upload(release["id"], file, digest)
+                return
+            except (OSError, http.client.HTTPException):
+                if attempt == 2:
+                    raise
+                print(f"附件连接中断，重试 {attempt + 1}/2：{file.name}", flush=True)
+                time.sleep(3 * (attempt + 1))
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        list(executor.map(upload_one, uploads))
     manifest = args.directory / "bundled-models.json"
     client.upload(release["id"], manifest, hashlib.sha256(manifest.read_bytes()).hexdigest())
 

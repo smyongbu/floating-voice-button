@@ -59,6 +59,28 @@ class BundledModelsTest(unittest.TestCase):
             (root / "模型清单.json").write_text(json.dumps({"models": [{"id": "metadata", "directory": "a"}]}))
             self.assertEqual({}, MODULE.local_index(root))
 
+    def test_chunk_restore_checks_overall_hash_and_keeps_old_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.write_bytes(b"abcdefghi")
+            target = root / "restored"
+            with patch.object(MODULE, "CHUNK_BYTES", 4):
+                chunks = MODULE.split_file(source, root, "large-model")
+            expected = {"bytes": 9, "sha256": hashlib.sha256(b"abcdefghi").hexdigest()}
+            MODULE.restore_chunks(root, chunks, target, expected)
+            self.assertEqual(b"abcdefghi", target.read_bytes())
+            (root / chunks[1]["name"]).write_bytes(b"xxxx")
+            with self.assertRaises(ValueError):
+                MODULE.restore_chunks(root, chunks, target, expected)
+            self.assertEqual(b"abcdefghi", target.read_bytes())
+
+    def test_chunk_paths_cannot_escape_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaises(ValueError):
+                MODULE.restore_chunks(root, [{"name": "../outside"}], root / "target", {"bytes": 1, "sha256": "0" * 64})
+
 
 if __name__ == "__main__":
     unittest.main()

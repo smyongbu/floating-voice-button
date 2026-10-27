@@ -9,6 +9,8 @@ from pathlib import Path
 import shutil
 import zipfile
 
+CHUNK_BYTES = 64 * 1024 * 1024
+
 APP_ROOT = Path(__file__).resolve().parents[1]
 MODEL_IDS = {
     "streaming-paraformer-bilingual-zh-en",
@@ -78,18 +80,72 @@ def materialize(source: Path, target: Path, item: dict) -> None:
 def prepare(destination: Path, *, source_root: Path | None, release_dir: Path | None, export: bool) -> None:
     resources = catalog()
     index = local_index(source_root) if source_root else {}
+    distribution = {}
+    release_metadata = json.loads((release_dir / "bundled-models.json").read_text(encoding="utf-8")) if release_dir and (release_dir / "bundled-models.json").exists() else {}
     for resource in resources:
         for item in resource["files"]:
             source = release_dir / asset_name(resource, item) if release_dir else index[(item["bytes"], item["sha256"])]
             relative = Path(asset_name(resource, item)) if export else Path("bundled-models") / resource["id"] / resource["version"] / item["path"]
-            materialize(source, destination / relative, item)
+            chunks = release_metadata.get("releaseFiles", {}).get(asset_name(resource, item), [])
+            if release_dir and chunks:
+                restore_chunks(release_dir, chunks, destination / relative, item)
+            elif export and item["bytes"] > 512 * 1024 * 1024:
+                verify(source, item)
+                distribution[asset_name(resource, item)] = split_file(source, destination, asset_name(resource, item))
+            else:
+                materialize(source, destination / relative, item)
             print(f"已校验：{resource['id']}/{item['path']}", flush=True)
     metadata = {"schemaVersion": 1, "variant": "three-models", "resources": resources}
+    if distribution:
+        metadata["releaseFiles"] = distribution
     destination.mkdir(parents=True, exist_ok=True)
     marker = destination / "bundled-models.json"
     part = marker.with_suffix(".json.part")
     part.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(part, marker)
+
+
+def split_file(source: Path, destination: Path, name: str) -> list[dict]:
+    destination.mkdir(parents=True, exist_ok=True)
+    parts = []
+    with source.open("rb") as stream:
+        number = 1
+        while data := stream.read(CHUNK_BYTES):
+            target = destination / f"{name}.part{number:03d}"
+            item = {"name": target.name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+            if target.exists():
+                verify(target, item)
+            else:
+                temporary = target.with_name(target.name + ".part")
+                temporary.write_bytes(data)
+                os.replace(temporary, target)
+            parts.append(item)
+            number += 1
+    return parts
+
+
+def restore_chunks(directory: Path, chunks: list[dict], target: Path, expected: dict) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part = target.with_name(target.name + ".part")
+    digest = hashlib.sha256()
+    count = 0
+    with part.open("wb") as output:
+        for chunk in chunks:
+            name = chunk["name"]
+            if Path(name).name != name or "\\" in name or name in (".", ".."):
+                raise ValueError("分块资源路径不安全")
+            source = directory / name
+            verify(source, chunk)
+            with source.open("rb") as stream:
+                while data := stream.read(1024 * 1024):
+                    count += len(data)
+                    if count > expected["bytes"]:
+                        raise ValueError("分块资源总大小异常")
+                    digest.update(data)
+                    output.write(data)
+    if count != expected["bytes"] or digest.hexdigest() != expected["sha256"]:
+        raise ValueError("还原模型的完整大小或哈希不符")
+    os.replace(part, target)
 
 
 def verify_apk(apk: Path) -> None:

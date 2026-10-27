@@ -161,7 +161,7 @@ files/logs/错误.log
 
 本轮用户明确要求将三个模型上传 GitHub 并编译进安装包，覆盖原来的按需下载默认要求。原始模型合计 2,024,244,101 字节，约 1.89 GiB；最终 APK 大小以实际产物为准。首次启动在后台从 APK 提取到原有私有 resource-packs 目录，显示安装进度；逐文件先写 .part，大小和 SHA-256 均正确后原子替换，全部文件就绪再写安装标记。已安装同版本模型直接复用，升级不重复复制。失败保留已有完整文件，点击重试时继续从 APK 本地安装，不要求重新联网下载。APK 自身占用与解包副本会同时存在；删除消费副本不能移除安装包中的资源，下次启动会恢复缺失的内置模型。
 
-- 构建资源：GitHub Release `voice-bundled-models-v1`，五个权重／词表文件及 `bundled-models.json`，按固定版本与哈希复用。
+- 构建资源：GitHub Release `voice-bundled-models-v1`，五个逻辑权重／词表文件及 `bundled-models.json`（Qwen 大文件使用 64 MiB 附件分块，云端逐块校验后还原完整文件，再校验原始总大小和 SHA-256），按固定版本与哈希复用。
 - 本地资源准备：`python scripts/bundle_models.py --export --source-root <共享模型仓库>`，仅在忽略的 local-resources 中建立消费链接／副本。
 - 上传：完成本机 GitHub 登录后运行 `python scripts/upload_model_assets.py`；令牌仅由 Git Credential Manager 加密存储提供，不显示、不写入源码或日志。
 - 云端准备：`python scripts/bundle_models.py --stage --release-dir local-resources/github-model-assets`。
@@ -169,7 +169,7 @@ files/logs/错误.log
 - 最终核验：`python scripts/bundle_models.py --verify-apk <本次APK>`，检查三个模型的身份、文件大小、SHA-256，拒绝缺失或额外模型；签名、包名和版本另由 apksigner 与 aapt 核对。
 - 回归：`python -B -m unittest discover -s scripts/tests -v`；Kotlin 单元测试覆盖内置模型安装、可信文件复用、坏哈希保留旧文件和截断文件不落成正式资源。
 
-当前状态：三个本机模型大小及哈希通过；资源附件上传中，本地九项脚本检查通过；云端编译、APK核验和真机结果待本轮实际完成后补写。AI规划服务不可用时保留本段待同步证据。
+当前状态：三个本机模型大小及哈希通过；资源附件上传中，本地十一项脚本检查通过；云端编译、APK核验和真机结果待本轮实际完成后补写。AI规划服务不可用时保留本段待同步证据。
 
 
 本轮发现历史 Actions Artifact 存储配额已满；APK 和校验文件改存到同一 GitHub 模型资源页，不开通付费配额。
