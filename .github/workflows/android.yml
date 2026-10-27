@@ -53,7 +53,7 @@ jobs:
             sleep 30
           done
           test "$READY" = 1
-          gh release download voice-bundled-models-v1 --repo "$GITHUB_REPOSITORY" --dir android-app/local-resources/github-model-assets
+          gh release download voice-bundled-models-v1 --repo "$GITHUB_REPOSITORY" --dir android-app/local-resources/github-model-assets --pattern "*--*" --pattern bundled-models.json
       - name: 校验并准备内置模型
         run: python -B android-app/scripts/bundle_models.py --stage --release-dir android-app/local-resources/github-model-assets
       - name: 准备固定开发签名
@@ -85,13 +85,13 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           APK="android-app/app/build/outputs/apk/debug/app-debug.apk"
           VERSION="$(sed -n 's/.*versionName = "\(.*\)"/\1/p' android-app/app/build.gradle.kts)"
-          NAME="语点-${VERSION}-Android-arm64-三模型开发版"
+          NAME="voicepoint-${VERSION}-android-arm64-three-models"
           mkdir -p android-app/发布
-          "$APKSIGNER" verify --verbose --print-certs "$APK" > "android-app/发布/${NAME}-校验.txt"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" > "android-app/发布/${NAME}-verification.txt"
           "$AAPT" dump badging "$APK" > "$RUNNER_TEMP/apk-badging.txt"
-          head -n 3 "$RUNNER_TEMP/apk-badging.txt" >> "android-app/发布/${NAME}-校验.txt"
+          head -n 3 "$RUNNER_TEMP/apk-badging.txt" >> "android-app/发布/${NAME}-verification.txt"
           cp "$APK" "android-app/发布/${NAME}.apk"
-          sha256sum "android-app/发布/${NAME}.apk" >> "android-app/发布/${NAME}-校验.txt"
+          sha256sum "android-app/发布/${NAME}.apk" >> "android-app/发布/${NAME}-verification.txt"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
       - name: 保存安装包到 GitHub 资源页
         env:

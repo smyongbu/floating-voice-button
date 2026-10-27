@@ -169,7 +169,9 @@ files/logs/错误.log
 - 最终核验：`python scripts/bundle_models.py --verify-apk <本次APK>`，检查三个模型的身份、文件大小、SHA-256，拒绝缺失或额外模型；签名、包名和版本另由 apksigner 与 aapt 核对。
 - 回归：`python -B -m unittest discover -s scripts/tests -v`；Kotlin 单元测试覆盖内置模型安装、可信文件复用、坏哈希保留旧文件和截断文件不落成正式资源。
 
-当前状态：三个本机模型大小及哈希通过；资源附件上传中，本地十一项脚本检查通过；云端编译、APK核验和真机结果待本轮实际完成后补写。AI规划服务不可用时保留本段待同步证据。
+2026-10-27 交付：源码与三个模型均已上传到现有公开仓库；[云构建 40455142929](https://github.com/smyongbu/floating-voice-button/actions/runs/40455142929) 全部成功，构建源码提交 `2453dbf6661e6beba573d82a84ff38bacea2b1a7`。十一项 Python 资源测试、安卓单元测试、Lint、内置模型核验与签名版本核验通过。APK 已下载到 `安装包\语点-0.15.0-Android-arm64-三模型开发版.apk`，本机再读包内三个模型的五个文件，版本、大小和 SHA-256 全部通过。APK 大小 2,097,560,174 字节，SHA-256 `e26a3fc6ee6ca255421d9341b9673588772e8f02dde9361dc3126dd5eb88c1e9`；包名 `com.smyongbu.voiceinput`，版本 0.15.0／23，最低 Android 8.0，arm64，固定开发证书 SHA-256 `a0f437136ccf8b61580c01d2b6af132f681fadafbfc40d11586f8610fd66a7ba`。资源页安装包附件名为 `voicepoint-0.15.0-android-arm64-three-models.apk`（GitHub 会清理中文附件名，后续工作流使用稳定英文附件名），中文显示标签与本地文件名保留。后续构建只下载模型附件和清单，避免把已交付 APK 再当构建资源下载。
+
+安装包下载：[GitHub 资源页](https://github.com/smyongbu/floating-voice-button/releases/tag/voice-bundled-models-v1)。首次启动解包模型，已装同版本可复用；安装包与私有模型副本合计约 4.12 GB，另预留安装临时空间。电脑当前未连接可用 Android 设备，真机安装、离线首次解包与实际识别效果尚未验证。AI规划服务仍不可连接，以上本轮授权、上传、构建和核验证据尚未同步。
 
 
 本轮发现历史 Actions Artifact 存储配额已满；APK 和校验文件改存到同一 GitHub 模型资源页，不开通付费配额。
