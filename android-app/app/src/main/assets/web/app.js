@@ -39,6 +39,7 @@
     navItems: [...document.querySelectorAll(".nav-item")],
     statusText: document.getElementById("statusText"),
     statusHint: document.getElementById("statusHint"),
+    recordingLimitText: document.getElementById("recordingLimitText"),
     recordButton: document.getElementById("recordButton"),
     recordButtonText: document.getElementById("recordButtonText"),
     cancelButton: document.getElementById("cancelButton"),
@@ -88,7 +89,6 @@
     overlayWaveFront: document.getElementById("overlayWaveFront"),
     overlayWaveMiddle: document.getElementById("overlayWaveMiddle"),
     overlayWaveBack: document.getElementById("overlayWaveBack"),
-    copyDiagnosticsButton: document.getElementById("copyDiagnosticsButton"),
     versionText: document.getElementById("versionText"),
     confirmDialog: document.getElementById("confirmDialog"),
     confirmMessage: document.getElementById("confirmMessage"),
@@ -343,18 +343,17 @@
   const modelResourceAliases = Object.freeze({
     realtimeEngine: {
       streaming_paraformer: ["streaming-paraformer", "streaming-paraformer-bilingual", "streaming-paraformer-bilingual-zh-en", "paraformer-streaming"],
-      zipformer: ["zipformer", "zipformer-bilingual"]
     },
     finalEngine: {
       faster_whisper_small: ["faster-whisper-small", "faster-whisper-small-gguf-q8-0"],
-      qwen3_asr_06b_int8: ["qwen3-asr-0.6b-int8", "qwen3-asr-06b-int8"],
       qwen3_asr_17b_q5_k_m: ["qwen3-asr-1.7b-q5-k-m", "qwen3-asr-17b-q5-k-m", "qwen3-asr-1.7b-gguf-q5-k-m"]
     }
   });
 
   function callNative(method, ...args) {
     if (!native || typeof native[method] !== "function") {
-      return runPreviewAction(method, args);
+      showToast("无法连接应用服务，请重启语点。");
+      return undefined;
     }
     try {
       return native[method](...args);
@@ -370,106 +369,6 @@
     callNative(method, String(value || ""));
   }
 
-  function runPreviewAction(method, args) {
-    const resourceById = (id) => state.resources.find((item) => item.id === id);
-    if (["ready", "setCurrentPage"].includes(method)) return undefined;
-    if (method === modelBridgeMethods.realtimeEngine || method === modelBridgeMethods.finalEngine) {
-      const settingKey = method === modelBridgeMethods.realtimeEngine ? "realtimeEngine" : "finalEngine";
-      state.settings[settingKey] = String(args[0] || state.settings[settingKey]);
-      renderSettings();
-      renderRecognition();
-      showToast("预览：识别模型已切换");
-      return undefined;
-    }
-    if (method === "setEngine") {
-      state.settings.engine = String(args[0] || "local_dual");
-      renderSettings();
-      renderRecognition();
-      showToast("预览：识别方案已切换");
-      return undefined;
-    }
-    if (method === "toggleRecognition") {
-      if (!state.recognition.active && hasMissingRequiredResources()) {
-        navigate("settings");
-        showToast("请先下载当前方案所需的离线模型");
-        return undefined;
-      }
-      if (state.recognition.active) {
-        window.clearTimeout(previewRecordingTimer);
-        window.clearInterval(previewLevelTimer);
-        state.recognition = {
-          active: true,
-          capturing: false,
-          phase: "processing",
-          status: "正在使用最后识别模型整理文字…",
-          text: state.recognition.text
-        };
-        renderRecognition();
-        previewRecordingTimer = window.setTimeout(() => {
-          const rawText = "我今天要 review this project，然后 update the README and fix the login bug。";
-          const id = Date.now();
-          state.recognition = { active: false, capturing: false, phase: "idle", status: "识别完成", text: rawText };
-          const item = { id, text: rawText, createdAt: new Date().toISOString().replace("T", " ").slice(0, 19), engine: state.settings.finalEngine };
-          state.history.unshift(item);
-          renderAll();
-        }, 1100);
-      } else {
-        state.recognition = { active: true, capturing: false, phase: "preparing", status: "正在准备本地模型…", text: "" };
-        renderRecognition();
-        previewRecordingTimer = window.setTimeout(() => {
-          state.recognition = { active: true, capturing: true, phase: "listening", status: "正在本地实时识别…", text: "你好，这是独立网页预览" };
-          renderRecognition();
-          previewLevelTimer = window.setInterval(() => waveform.setLevel(0.12 + Math.random() * 0.75), 110);
-        }, 650);
-      }
-      return undefined;
-    }
-    if (method === "cancelRecognition") {
-      window.clearTimeout(previewRecordingTimer);
-      window.clearInterval(previewLevelTimer);
-      state.recognition = { active: false, capturing: false, phase: "idle", status: "本次识别已取消", text: "" };
-      renderRecognition();
-      return undefined;
-    }
-    if (method === "downloadResource") {
-      const resource = resourceById(String(args[0]));
-      if (!resource) return undefined;
-      resource.status = "downloading";
-      resource.presentBytes = Math.max(resource.presentBytes, Math.round(resource.totalBytes * 0.36));
-      resource.speedBytesPerSecond = 5242880;
-      resource.etaSeconds = Math.round((resource.totalBytes - resource.presentBytes) / resource.speedBytesPerSecond);
-      renderResources();
-      showToast("预览：已模拟开始下载");
-      return undefined;
-    }
-    if (method === "pauseResource") {
-      const resource = resourceById(String(args[0]));
-      if (resource) { resource.status = "paused"; resource.speedBytesPerSecond = 0; renderResources(); }
-      return undefined;
-    }
-    if (method === "verifyResource") { showToast("预览：模型校验通过"); return undefined; }
-    if (method === "deleteResource") {
-      const resource = resourceById(String(args[0]));
-      if (resource) { resource.status = "missing"; resource.presentBytes = 0; resource.installedBytes = 0; renderResources(); renderRecognition(); }
-      return undefined;
-    }
-    if (method === "deleteHistory") {
-      state.history = state.history.filter((item) => Number(item.id) !== Number(args[0]));
-      state.selectedHistoryIds.delete(Number(args[0]));
-      renderHistory();
-      renderSettings();
-      return undefined;
-    }
-    if (method === "clearHistory") { state.history = []; state.selectedHistoryIds.clear(); renderHistory(); renderSettings(); return undefined; }
-    if (method === "copyText" || method === "copyHistory" || method === "copyDiagnostics") { showToast("预览：已模拟复制"); return undefined; }
-    if (method === "setOverlayEnabled") { state.settings.overlayEnabled = Boolean(args[0]); state.settings.overlayPermission = true; renderSettings(); return undefined; }
-    if (method === "setOverlayTextEnabled") { state.settings.overlayTextEnabled = Boolean(args[0]); renderSettings(); return undefined; }
-    if (method === "setOverlayOpacity") { state.settings.overlayOpacity = Number(args[0]); renderSettings(); return undefined; }
-    if (method === "setOverlaySize") { state.settings.overlaySize = Number(args[0]); renderSettings(); return undefined; }
-    showToast("当前操作仅在正式 App 中生效");
-    return undefined;
-  }
-
   function loadInitialState() {
     if (native && typeof native.getInitialState === "function") {
       try {
@@ -478,23 +377,7 @@
         return null;
       }
     }
-    return {
-      recognition: { active: false, capturing: false, phase: "idle", status: "实时与最后识别模型已就绪", text: "", finalProcessing: false, finalQueueCount: 0, finalText: "" },
-      settings: { ...state.settings },
-      resources: [
-        { id: "streaming-paraformer-bilingual-zh-en", name: "Streaming Paraformer", purpose: "边说边显示中英文识别文字", version: "8e40c432-int8", totalBytes: 237202501, presentBytes: 237202501, installedBytes: 237202501, status: "available", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
-        { id: "zipformer-bilingual", name: "Zipformer", purpose: "边说边显示中英文和中英混说识别文字", version: "2024-03-20-exp32-int8", totalBytes: 60142871, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
-        { id: "faster-whisper-small-gguf-q8-0", name: "Faster-Whisper Small", purpose: "停止后生成完整的最终识别文字", version: "c0214bd3-q8_0", totalBytes: 269751136, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
-        { id: "qwen3-asr-0.6b-int8", name: "Qwen3-ASR 0.6B INT8", purpose: "停止后生成中英文和中英混说最终文字", version: "68818b23-int8", totalBytes: 987015347, presentBytes: 0, installedBytes: 0, status: "missing", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" },
-        { id: "qwen3-asr-1.7b-gguf-q5-k-m", name: "Qwen3-ASR 1.7B Q5_K_M", purpose: "停止后生成高质量的中英文最终识别文字", version: "92282af1-q5_k_m", totalBytes: 1517290464, presentBytes: 1517290464, installedBytes: 1517290464, status: "available", speedBytesPerSecond: 0, etaSeconds: 0, freeBytes: 11717148672, errorMessage: "" }
-      ],
-      history: [
-        { id: 3, text: "我今天要 review this project，然后 update the README and fix the login bug。", createdAt: "2026-08-20 14:32:00", engine: "qwen3_asr_17b_q5_k_m" },
-        { id: 2, text: "Please create a new note and copy this sentence.", createdAt: "2026-08-18 17:16:00", engine: "local_dual_qwen" },
-        { id: 1, text: "这是一条较长的模拟历史记录，用于检查卡片换行、复制按钮和删除按钮在窄屏幕上的排版。", createdAt: "2026-08-18 16:03:00", engine: "local_zipformer" }
-      ],
-      version: "独立 UI 预览"
-    };
+    return null;
   }
 
   function mergeSettings(next) {
@@ -539,6 +422,10 @@
         renderRecognition();
         break;
       case "audioLevel":
+        if (Number.isFinite(event.remainingRecordingMs)) {
+          state.recognition.remainingRecordingMs = event.remainingRecordingMs;
+          renderRecordingLimit();
+        }
         waveform.setLevel(event.level);
         overlayWaveform.setLevel(event.level);
         break;
@@ -580,7 +467,18 @@
     renderResources();
   }
 
+  function renderRecordingLimit() {
+    const capturing = Boolean(state.recognition.capturing);
+    const ms = Number(state.recognition.remainingRecordingMs);
+    const remaining = Math.max(0, Math.ceil((Number.isFinite(ms) ? ms : 180000) / 1000));
+    elements.recordingLimitText.textContent = capturing
+      ? `剩余 ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")} · 最长 3 分钟`
+      : "单段录音上限 3 分钟";
+    elements.recordingLimitText.classList.toggle("is-near-limit", capturing && remaining <= 15);
+  }
+
   function renderRecognition() {
+    renderRecordingLimit();
     const recognition = state.recognition;
     const phase = recognition.phase || "idle";
     const active = Boolean(recognition.active);
@@ -629,7 +527,7 @@
       const resource = selectedModelResource(settingKey);
       const measurable = Boolean(resource && resource.totalBytes > 0 && resource.presentBytes >= 0);
       const progress = measurable ? Math.min(100, Math.max(0, resource.presentBytes / resource.totalBytes * 100)) : 0;
-      const resourceLoading = Boolean(resource && ["downloading", "pausing", "verifying"].includes(resource.status));
+      const resourceLoading = Boolean(resource && ["downloading", "pausing", "verifying", "installing"].includes(resource.status));
       const preparing = active && phase === "preparing";
       const loading = resourceLoading || preparing;
       const indeterminate = loading && (!resourceLoading || !measurable);
@@ -897,9 +795,9 @@
       if (["downloading", "pausing"].includes(resource.status)) {
         record.header.append(record.status);
         record.footer.append(resourceButton(resource.status === "pausing" ? "正在暂停" : "暂停下载", () => callNative("pauseResource", resource.id), false, resource.status === "pausing"));
-      } else if (resource.status === "verifying") {
+      } else if (["verifying", "installing"].includes(resource.status)) {
         record.header.append(record.status);
-        record.footer.append(resourceButton("正在校验完整性", () => {}, false, true));
+        record.footer.append(resourceButton(resource.status === "installing" ? "正在安装内置模型" : "正在校验完整性", () => {}, false, true));
       } else if (resource.status === "available") {
         record.footer.append(resourceButton("校验模型", () => callNative("verifyResource", resource.id)));
         record.footer.append(resourceButton("删除模型", () => {
@@ -1039,14 +937,12 @@
   function realtimeModelName(value) {
     return {
       streaming_paraformer: "Streaming Paraformer",
-      zipformer: "Zipformer"
     }[value] || "正在读取模型";
   }
 
   function finalModelName(value) {
     return {
       faster_whisper_small: "Faster-Whisper Small",
-      qwen3_asr_06b_int8: "Qwen3-ASR 0.6B INT8",
       qwen3_asr_17b_q5_k_m: "Qwen3-ASR 1.7B Q5_K_M"
     }[value] || "正在读取模型";
   }
@@ -1058,6 +954,7 @@
       pausing: "暂停中",
       paused: "已暂停",
       verifying: "校验中",
+      installing: "安装内置模型中",
       error: "需要重试",
       missing: "未安装"
     }[status] || "未安装";
@@ -1073,14 +970,11 @@
       local_dual: "实时＋校正",
       local_dual_qwen: "实时＋Qwen 校正",
       local_dual_whisper_acft: "实时＋Whisper 二次识别",
-      local_zipformer: "仅实时",
       local_paraformer: "仅整段",
       local_qwen: "仅 Qwen",
       local_whisper_acft: "Whisper ACFT",
       streaming_paraformer: "Streaming Paraformer",
-      zipformer: "Zipformer",
       faster_whisper_small: "Faster-Whisper Small",
-      qwen3_asr_06b_int8: "Qwen3-ASR 0.6B INT8",
       qwen3_asr_17b_q5_k_m: "Qwen3-ASR 1.7B Q5_K_M"
     }[raw] || "未知方式";
   }
@@ -1332,7 +1226,6 @@
       : "待机：点击悬浮球开始识别。";
     window.requestAnimationFrame(updateOverlayPreviewTextPosition);
   });
-  elements.copyDiagnosticsButton.addEventListener("click", () => callNative("copyDiagnostics"));
   elements.confirmCancel.addEventListener("click", closeConfirm);
   elements.confirmAccept.addEventListener("click", () => {
     const action = confirmAction;

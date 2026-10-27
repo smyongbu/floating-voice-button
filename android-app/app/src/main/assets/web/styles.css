@@ -1,8 +1,9 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --color-primary: #2563eb;
   --color-primary-strong: #1d4ed8;
   --color-primary-soft: #eaf1ff;
+  --color-on-primary: #ffffff;
   --color-accent: #0891b2;
   --color-background: #f4f7fb;
   --color-surface: #ffffff;
@@ -35,30 +36,30 @@
   text-rendering: optimizeLegibility;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-primary: #6ea0ff;
-    --color-primary-strong: #8ab3ff;
-    --color-primary-soft: #162a4f;
-    --color-accent: #4dd4ed;
-    --color-background: #09111f;
-    --color-surface: #111c2e;
-    --color-surface-raised: #162237;
-    --color-surface-muted: #0d1727;
-    --color-text: #f3f7ff;
-    --color-text-secondary: #bac7d9;
-    --color-text-tertiary: #93a4ba;
-    --color-border: #27364c;
-    --color-border-strong: #384a63;
-    --color-danger: #ff8b84;
-    --color-danger-soft: #3c1b20;
-    --color-warning: #ffc071;
-    --color-warning-soft: #3d2912;
-    --color-success: #5ce1b7;
-    --color-success-soft: #12382f;
-    --shadow-card: 0 14px 38px rgba(0, 0, 0, 0.24), 0 2px 8px rgba(0, 0, 0, 0.18);
-    --shadow-nav: 0 -8px 30px rgba(0, 0, 0, 0.28);
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-primary: #6ea0ff;
+  --color-primary-strong: #8ab3ff;
+  --color-primary-soft: #162a4f;
+  --color-on-primary: #09111f;
+  --color-accent: #4dd4ed;
+  --color-background: #09111f;
+  --color-surface: #111c2e;
+  --color-surface-raised: #162237;
+  --color-surface-muted: #0d1727;
+  --color-text: #f3f7ff;
+  --color-text-secondary: #bac7d9;
+  --color-text-tertiary: #93a4ba;
+  --color-border: #27364c;
+  --color-border-strong: #384a63;
+  --color-danger: #ff8b84;
+  --color-danger-soft: #3c1b20;
+  --color-warning: #ffc071;
+  --color-warning-soft: #3d2912;
+  --color-success: #5ce1b7;
+  --color-success-soft: #12382f;
+  --shadow-card: 0 14px 38px rgba(0, 0, 0, 0.24), 0 2px 8px rgba(0, 0, 0, 0.18);
+  --shadow-nav: 0 -8px 30px rgba(0, 0, 0, 0.28);
 }
 
 * {
@@ -345,13 +346,14 @@ button:disabled {
 .button-primary {
   border-color: var(--color-primary-strong);
   background: linear-gradient(135deg, var(--color-primary), var(--color-primary-strong));
-  color: #ffffff;
+  color: var(--color-on-primary);
   box-shadow: 0 10px 22px color-mix(in srgb, var(--color-primary) 24%, transparent);
 }
 
 .button-primary[data-active="true"] {
   border-color: color-mix(in srgb, var(--color-text) 15%, var(--color-primary));
   background: var(--color-text);
+  color: var(--color-background);
   box-shadow: none;
 }
 
@@ -1049,12 +1051,12 @@ button:disabled {
   background:
     radial-gradient(circle at 18% 22%, rgba(85, 134, 255, 0.26), transparent 34%),
     radial-gradient(circle at 82% 78%, rgba(55, 201, 196, 0.22), transparent 38%),
-    linear-gradient(145deg, #e9effc, #f8fbff 58%, #e8f5f4);
+    linear-gradient(145deg, var(--color-primary-soft), var(--color-surface-muted) 58%, var(--color-background));
 }
 .overlay-demo::before {
   position: absolute;
   inset: 0;
-  background-image: linear-gradient(rgba(255,255,255,.34) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.34) 1px, transparent 1px);
+  background-image: linear-gradient(color-mix(in srgb, var(--color-text) 8%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--color-text) 8%, transparent) 1px, transparent 1px);
   background-size: 20px 20px;
   content: "";
   pointer-events: none;
@@ -1065,9 +1067,9 @@ button:disabled {
   top: var(--overlay-demo-text-y, 50%);
   max-width: none;
   padding: 11px 13px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--color-border-strong);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.68);
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
   color: var(--color-text);
   font-size: 0.78rem;
   line-height: 1.5;
@@ -1491,35 +1493,6 @@ button:disabled {
 
 .resource-action.is-danger {
   color: var(--color-danger);
-}
-
-.diagnostics-action {
-  display: inline-flex;
-  min-height: 48px;
-  width: 100%;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  margin-top: 13px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 12px;
-  background: var(--color-surface-muted);
-  color: var(--color-primary-strong);
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.88rem;
-  font-weight: 720;
-  transition: background-color var(--duration-fast) ease, border-color var(--duration-fast) ease, transform var(--duration-fast) var(--ease-out);
-}
-
-.diagnostics-action svg {
-  width: 19px;
-  height: 19px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.8;
 }
 
 .setting-row {
@@ -2113,3 +2086,13 @@ body::-webkit-scrollbar {
   display: none;
   width: 0;
 }
+
+.theme-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.theme-setting-row h2 { margin: 0; }
+.theme-options { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--color-border); border-radius: 14px; background: var(--color-surface-muted); }
+.theme-options button { min-height: 44px; min-width: 68px; padding: 8px 16px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--color-text-secondary); cursor: pointer; }
+.theme-options button[aria-pressed="true"] { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-primary-strong); font-weight: 500; }
+
+
+.recording-limit { margin: 0; color: var(--color-text-secondary); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.recording-limit.is-near-limit { color: var(--color-warning); font-weight: 500; }

@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>悬浮语音按钮</title>
+  <script src="theme.js"></script>
   <link rel="stylesheet" href="styles.css?v=20260824-01">
 </head>
 <body>
@@ -98,6 +99,7 @@
             </button>
             <button id="cancelButton" class="button button-quiet is-hidden" type="button">取消本次</button>
             <p id="statusHint" class="status-hint">准备完成后即可开始识别</p>
+            <p id="recordingLimitText" class="recording-limit" role="timer" aria-live="off">单段录音上限 3 分钟</p>
           </div>
         </section>
 
@@ -152,6 +154,16 @@
           </div>
         </header>
 
+        <section class="settings-section" aria-labelledby="themeTitle">
+          <div class="setting-row theme-setting-row">
+            <h2 id="themeTitle" class="resource-section-title">界面主题</h2>
+            <div class="theme-options" role="group" aria-labelledby="themeTitle">
+              <button type="button" data-theme-choice="light" aria-pressed="false">白色</button>
+              <button type="button" data-theme-choice="dark" aria-pressed="false">黑色</button>
+            </div>
+          </div>
+        </section>
+
         <section class="settings-section" aria-labelledby="engineTitle">
           <div class="section-heading">
             <div>
@@ -167,11 +179,6 @@
                 <span class="radio-mark" aria-hidden="true"></span>
                 <span class="engine-copy"><strong>Streaming Paraformer</strong><small>运行内存约 500 MB</small></span>
               </label>
-              <label class="engine-card">
-                <input type="radio" name="realtimeEngine" value="zipformer">
-                <span class="radio-mark" aria-hidden="true"></span>
-                <span class="engine-copy"><strong>Zipformer</strong><small>运行内存约 200 MB</small></span>
-              </label>
             </fieldset>
             <fieldset class="engine-group">
               <legend><strong>最后识别</strong><span>停止录音后生成最终文字</span></legend>
@@ -179,11 +186,6 @@
                 <input type="radio" name="finalEngine" value="faster_whisper_small">
                 <span class="radio-mark" aria-hidden="true"></span>
                 <span class="engine-copy"><strong>Faster-Whisper Small</strong><small>运行内存约 1.5 GB</small></span>
-              </label>
-              <label class="engine-card">
-                <input type="radio" name="finalEngine" value="qwen3_asr_06b_int8">
-                <span class="radio-mark" aria-hidden="true"></span>
-                <span class="engine-copy"><strong>Qwen3-ASR 0.6B INT8</strong><small>运行内存约 2 GB</small></span>
               </label>
               <label class="engine-card">
                 <input type="radio" name="finalEngine" value="qwen3_asr_17b_q5_k_m" checked>
@@ -251,20 +253,6 @@
             <input id="overlaySize" type="range" min="48" max="88" step="2" value="64">
             <output id="overlaySizeValue" for="overlaySize">64 dp</output>
           </div>
-        </section>
-
-        <section class="settings-section" aria-labelledby="diagnosticsTitle">
-          <div class="section-heading">
-            <div>
-              <p class="section-kicker">排查问题</p>
-              <h2 id="diagnosticsTitle">诊断与日志</h2>
-            </div>
-          </div>
-          <p class="section-description">诊断摘要不包含录音或识别正文，可在反馈问题时复制。</p>
-          <button id="copyDiagnosticsButton" class="diagnostics-action" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
-            <span>复制诊断信息</span>
-          </button>
         </section>
 
         <section class="privacy-note" aria-label="隐私说明">

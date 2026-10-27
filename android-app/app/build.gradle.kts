@@ -14,17 +14,29 @@ val hasDevelopmentSigning = listOf(
     developmentKeyPassword,
 ).all { !it.isNullOrBlank() }
 
+val includeBundledModels = providers.gradleProperty("bundledModels").map { it.toBoolean() }.getOrElse(false)
+val bundledAssets = layout.buildDirectory.dir("generated/bundled-assets")
+if (includeBundledModels) {
+    check(bundledAssets.get().file("bundled-models.json").asFile.isFile) { "请先运行 scripts/bundle_models.py --stage" }
+}
+
 android {
+    buildFeatures { buildConfig = true }
+    androidResources { noCompress += listOf("onnx", "gguf") }
+    if (includeBundledModels) {
+        sourceSets.getByName("main").assets.srcDir(bundledAssets)
+    }
     namespace = "com.smyongbu.voiceinput"
     compileSdk = 35
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.smyongbu.voiceinput"
+        buildConfigField("boolean", "BUNDLED_MODELS", includeBundledModels.toString())
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.13.0"
+        versionCode = 23
+        versionName = "0.15.0"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild {
             cmake {

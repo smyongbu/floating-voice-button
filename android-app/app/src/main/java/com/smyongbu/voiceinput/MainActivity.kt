@@ -244,6 +244,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
             emit(JSONObject().apply {
                 put("type", "audioLevel")
                 put("level", level.coerceIn(0f, 1f).toDouble())
+                put("remainingRecordingMs", RecognitionController.remainingRecordingMs())
             })
         }
     }
@@ -838,6 +839,7 @@ class MainActivity : Activity(), RecognitionController.Listener, ModelResourceMa
         return JSONObject().apply {
             put("active", state.active)
             put("capturing", state.capturing)
+            put("remainingRecordingMs", state.remainingRecordingMs)
             put("phase", state.phase)
             put("status", state.status)
             put("text", state.text)

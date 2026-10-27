@@ -26,17 +26,13 @@ class ModelManifestTest(unittest.TestCase):
         self.assertEqual(
             {
                 "streaming-paraformer-bilingual-zh-en",
-                "zipformer-bilingual",
                 "faster-whisper-small-gguf-q8-0",
-                "qwen3-asr-0.6b-int8",
                 "qwen3-asr-1.7b-gguf-q5-k-m",
             },
             set(totals),
         )
         self.assertEqual(237_202_501, totals["streaming-paraformer-bilingual-zh-en"])
-        self.assertEqual(60_142_871, totals["zipformer-bilingual"])
         self.assertEqual(269_751_136, totals["faster-whisper-small-gguf-q8-0"])
-        self.assertEqual(987_015_347, totals["qwen3-asr-0.6b-int8"])
         self.assertEqual(1_517_290_464, totals["qwen3-asr-1.7b-gguf-q5-k-m"])
         self.assertTrue(all(len(item.sha256) == 64 for resource in resources for item in resource.files))
 

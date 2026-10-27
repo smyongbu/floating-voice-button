@@ -1,6 +1,6 @@
 # 安卓语音输入
 
-面向红米 K70 的本地中英双语语音识别 App，安装后名称为“语点”，当前版本为 `0.13.0`。主界面统一使用本地 HTML、CSS 和 JavaScript，Kotlin 只负责 WebView 宿主、麦克风、识别模型、权限、历史数据库、下载器、通知和系统级悬浮窗等平台能力。Streaming Paraformer、Zipformer 与 Qwen3-ASR 0.6B INT8 使用 `sherpa-onnx 1.13.5`；Faster-Whisper Small 与 Qwen3-ASR 1.7B Q5_K_M 使用固定提交的 `transcribe.cpp` Android JNI 运行层。
+面向红米 K70 的本地中英双语语音识别 App，安装后名称为“语点”，当前版本为 `0.15.0`。主界面统一使用本地 HTML、CSS 和 JavaScript，Kotlin 只负责 WebView 宿主、麦克风、识别模型、权限、历史数据库、下载器、通知和系统级悬浮窗等平台能力。Streaming Paraformer 使用 `sherpa-onnx 1.13.5`；Faster-Whisper Small 与 Qwen3-ASR 1.7B Q5_K_M 使用固定提交的 `transcribe.cpp` Android JNI 运行层。
 
 ## 主要功能
 
@@ -8,9 +8,9 @@
 - 录音页依次显示当前模型、识别结果、声波与开始按钮；记录卡片整卡可复制，右下角显示复制图标，右上角使用灰色关闭图标删除。
 - 实际麦克风开始收音前明确显示“准备中”，开始收音后才进入“正在聆听”，避免漏掉开头。
 - 停止收音后会立即把音频加入后台最终识别队列，可以继续录制下一段；最终模型按录制顺序逐条处理，首页显示排队数量，记录页显示“最后识别中”或“排队等待”。队列最多等待 8 段，达到上限时会保留并保存实时文字，不丢失已有转写。
-- “实时显示”和“最后识别”是两个始终可见、彼此独立的模型选择组。实时显示可选 Streaming Paraformer 或 Zipformer；最后识别可选 Faster-Whisper Small、Qwen3-ASR 0.6B INT8 或 Qwen3-ASR 1.7B Q5_K_M。录音首页用两个独立卡片上下显示当前模型；下载或校验时卡片按真实字节进度填充并在模型名右侧显示百分比，模型可用后保持浅蓝色。
-- Streaming Paraformer 与 Zipformer 都在讲话时实时显示中文、英文及中英混说文字；Zipformer 使用 `modified_beam_search` 和 4 条活动路径，并在检测到句段端点后提交当前段、继续识别长句。
-- 停止收音后，所选最终模型直接读取本轮完整原始音频并生成最终文字。界面中的 Faster-Whisper Small 在 Android 上使用同一 Whisper Small 的 `transcribe.cpp` GGUF Q8_0 模型；Qwen3-ASR 1.7B Q5_K_M 同样由 `transcribe.cpp` 运行，Qwen3-ASR 0.6B INT8 继续由 `sherpa-onnx` 运行。
+- “实时显示”和“最后识别”是两个始终可见、彼此独立的模型选择组。实时显示可选 Streaming Paraformer；最后识别可选 Faster-Whisper Small 或 Qwen3-ASR 1.7B Q5_K_M。录音首页用两个独立卡片上下显示当前模型；下载或校验时卡片按真实字节进度填充并在模型名右侧显示百分比，模型可用后保持浅蓝色。
+- Streaming Paraformer 都在讲话时实时显示中文、英文及中英混说文字，并在检测到句段端点后提交当前段、继续识别长句。
+- 停止收音后，所选最终模型直接读取本轮完整原始音频并生成最终文字。界面中的 Faster-Whisper Small 在 Android 上使用同一 Whisper Small 的 `transcribe.cpp` GGUF Q8_0 模型；Qwen3-ASR 1.7B Q5_K_M 同样由 `transcribe.cpp` 运行。
 - 每次新识别都会清空上一轮临时文字，不再残留旧内容。
 - 识别声波由原生音量值驱动本地 SVG 三层连续曲线，只在真正收音时运动；系统开启“减少动态效果”后会降低动态更新。
 - 最终文字保存在本机 SQLite 历史中，最多 500 条；记录按聊天方式由旧到新排列，最新内容在底部，支持搜索、复制单条、复制全部、删除和清空。
@@ -23,7 +23,7 @@
 
 ### UI 浏览页
 
-面向用户查看、标注和验收的独立预览入口位于项目上级目录的 `UI预览\打开预览.html`。该页面包含外部说明区、19.5:9 手机框、常用网页宽度切换和模拟状态，可直接双击打开；手机框内部加载 `UI预览\app\index.html?preview=1`。日常查看不要直接打开正式资源目录中的裸 `app/src/main/assets/web/index.html`，也不依赖项目外的公共预览目录。
+面向用户查看、标注和验收的独立预览入口位于项目上级目录的 `UI预览\打开预览.html`。该页面包含外部说明区、19.5:9 手机框、屏幕比例切换和模拟状态，可直接双击打开；手机框内部加载 `UI预览\app\index.html?preview=1`。日常查看不要直接打开正式资源目录中的裸 `app/src/main/assets/web/index.html`，也不依赖项目外的公共预览目录。
 
 界面支持：
 
@@ -35,16 +35,14 @@
 
 ## 模型与安装包
 
-模型不再编入 APK，也不提交到 Git。安装包只包含应用、网页界面、识别运行库和小型资源，模型在首次使用相关方案时单独下载。当前资源为：
+本次按用户要求提供自带三个模型的 APK：Streaming Paraformer、Whisper Small Q8_0（界面沿用 Faster-Whisper Small 名称）及 Qwen3-ASR 1.7B Q5_K_M。模型不进入源码 Git 历史，作为 GitHub 模型资源附件保存；云构建下载后逐文件核对大小与 SHA-256，再嵌入 APK。轻量构建仍可通过不传 `-PbundledModels=true` 保留。当前资源为：
 
 | 资源 | 用途 | 大小 |
 | --- | --- | ---: |
 | Streaming Paraformer INT8 | 实时显示中文、英文和中英混说文字 | 237,202,501 字节，约 226.2 MiB |
-| 中英双语 Zipformer | 实时显示中文、英文和中英混说文字 | 60,142,871 字节，约 57.4 MiB |
 | Faster-Whisper Small（GGUF Q8_0） | 停止后对完整原始音频生成最终文字 | 269,751,136 字节，约 257.3 MiB |
-| Qwen3-ASR 0.6B INT8 | 停止后高质量识别中英文和中英混说 | 987,015,347 字节，约 941.3 MiB |
 | Qwen3-ASR 1.7B Q5_K_M | 停止后高质量识别多语言、中文方言和中英混说 | 1,517,290,464 字节，约 1.41 GiB |
-| 合计 | 五套资源全部安装 | 3,071,402,319 字节，约 2.86 GiB |
+| 合计 | 三套资源全部安装 | 2,024,244,101 字节，约 1.89 GiB |
 
 实时显示和最后识别必须各选择一套模型，两组可以任意组合，用户只需下载实际选择的资源。“离线模型”显示每套资源的用途、版本、下载大小、已占空间、进度、速度和预计剩余时间。下载支持暂停、继续、HTTP Range 断点续传、失败重试和 SHA-256 校验；校验成功后才原子写入版本标记。开始下载时还会预留 64 MiB 可用空间。用户可删除或重新下载单个模型。
 
@@ -54,17 +52,15 @@
 no_backup/resource-packs/<资源编号>/<版本>/
 ```
 
-Streaming Paraformer、Zipformer 与 Qwen3-ASR 0.6B INT8 使用 k2-fsa/sherpa-onnx 公开模型；Faster-Whisper Small 和 Qwen3-ASR 1.7B 使用 handy-computer 发布的 `transcribe.cpp` GGUF 模型。五套模型均标记为 Apache-2.0；`sherpa-onnx` 为 Apache-2.0，固定提交的 `transcribe.cpp` 为 MIT。来源、固定版本、许可证与逐文件校验信息记录在资源清单和 `THIRD_PARTY_NOTICES.md` 中；同一份第三方说明也随 APK 放入 `assets/licenses`。
+Streaming Paraformer 使用 k2-fsa/sherpa-onnx 公开模型；Faster-Whisper Small 和 Qwen3-ASR 1.7B 使用 handy-computer 发布的 `transcribe.cpp` GGUF 模型。三套模型均标记为 Apache-2.0；`sherpa-onnx` 为 Apache-2.0，固定提交的 `transcribe.cpp` 为 MIT。来源、固定版本、许可证与逐文件校验信息记录在资源清单和 `THIRD_PARTY_NOTICES.md` 中；同一份第三方说明也随 APK 放入 `assets/licenses`。
 
 ## 开发机同步模型
 
-开发机的模型统一放在项目外的共享规范源 `O:\程序\共享模型仓库`。同步脚本通过相对于共同上级目录的路径定位，也可用环境变量 `VOICE_INPUT_MODEL_REPOSITORY` 或参数 `--source-root` 覆盖：
+开发机的模型统一放在项目外的共享规范源 `D:\程序\共享模型仓库`。同步脚本通过相对于共同上级目录的路径定位，也可用环境变量 `VOICE_INPUT_MODEL_REPOSITORY` 或参数 `--source-root` 覆盖：
 
 ```text
-O:\程序\共享模型仓库\
+D:\程序\共享模型仓库\
 ├─ streaming-paraformer-bilingual-zh-en/
-├─ zipformer-bilingual/
-├─ qwen3-asr-0.6b-int8/
 ├─ faster-whisper-small-gguf-q8-0/
 │  └─ whisper-small-Q8_0.gguf
 └─ qwen3-asr-1.7b-gguf-q5-k-m/
@@ -142,3 +138,35 @@ files/logs/错误.log
 ```
 
 两类日志分别轮转，只记录版本、操作编号、阶段、耗时、心跳、模型状态和错误堆栈，不记录识别正文。debug 包可用 `adb shell run-as com.smyongbu.voiceinput` 只读提取。
+
+
+## 0.14.0 本轮构建
+
+- 应用已确认的设置页白色／黑色主题切换，选择保存在本机 WebView 存储中；首次跟随系统。配色覆盖录音按钮和设置页悬浮球演示背景、网格及文字框。
+- 删除设置页“诊断与日志”卡片和复制入口，保留版本信息。
+- 收音上限从 10 分钟改为 3 分钟。准备模型不计时，由原生收音层的单调时钟截止时间和最多 2,880,000 个 16 kHz 样本双重限制；网页和系统悬浮入口共用，到时沿用最终识别队列并保存结果。网页倒计时读取原生剩余时间。
+- 模型下载、权限与最终识别仍使用正式接口；发布前端移除预览模拟识别与示例历史回退。浏览器未连接宿主时显示服务不可用，不模拟成功。
+- 版本号 0.14.0，versionCode 21；继续沿用已配置的长期开发签名，不读取或更换签名密钥。
+
+当前阶段：正式源码同步完成，6 项资源单元检查、网页脚本语法及正式页面控件引用检查已通过；Kotlin 单元测试、Lint、APK 构建、签名及真机检查须以实际构建结果为准。用户已于 2026-10-27 明确允许上传至现有公开仓库并继续云编译；构建完成后再记录 APK 核验结果。AI规划服务连接失败，待同步本轮确认、正式实施与构建证据。
+
+## 0.14.1 模型精简
+
+按用户要求移除 Qwen3-ASR 0.6B INT8 的选项、下载清单和运行分支；旧选择迁移为 Faster-Whisper Small，其余模型和历史记录保持。电脑共享模型已列入本轮定向清理。验证与构建结果见本轮交付记录；AI规划暂不可连接，尚未同步。
+
+2026-10-27：移除 Zipformer 模型选项、下载清单和加载分支，旧选择迁移到 Streaming Paraformer；用户已自行删除安卓模型。本轮仅本地修改，不上传、不编译、不安装；6项资源测试及脚本语法核验通过，Kotlin编译未执行。AI规划尚未同步。
+
+
+## 0.15.0 自带三模型版本
+
+本轮用户明确要求将三个模型上传 GitHub 并编译进安装包，覆盖原来的按需下载默认要求。原始模型合计 2,024,244,101 字节，约 1.89 GiB；最终 APK 大小以实际产物为准。首次启动在后台从 APK 提取到原有私有 resource-packs 目录，显示安装进度；逐文件先写 .part，大小和 SHA-256 均正确后原子替换，全部文件就绪再写安装标记。已安装同版本模型直接复用，升级不重复复制。失败保留已有完整文件，点击重试时继续从 APK 本地安装，不要求重新联网下载。APK 自身占用与解包副本会同时存在；删除消费副本不能移除安装包中的资源，下次启动会恢复缺失的内置模型。
+
+- 构建资源：GitHub Release `voice-bundled-models-v1`，五个权重／词表文件及 `bundled-models.json`，按固定版本与哈希复用。
+- 本地资源准备：`python scripts/bundle_models.py --export --source-root <共享模型仓库>`，仅在忽略的 local-resources 中建立消费链接／副本。
+- 上传：完成本机 GitHub 登录后运行 `python scripts/upload_model_assets.py`；令牌仅由 Git Credential Manager 加密存储提供，不显示、不写入源码或日志。
+- 云端准备：`python scripts/bundle_models.py --stage --release-dir local-resources/github-model-assets`。
+- 含模型构建：`gradle --no-daemon -PbundledModels=true assembleDebug`；模型资产来自 build/generated/bundled-assets，缺少清单时拒绝构建。
+- 最终核验：`python scripts/bundle_models.py --verify-apk <本次APK>`，检查三个模型的身份、文件大小、SHA-256，拒绝缺失或额外模型；签名、包名和版本另由 apksigner 与 aapt 核对。
+- 回归：`python -B -m unittest discover -s scripts/tests -v`；Kotlin 单元测试覆盖内置模型安装、可信文件复用、坏哈希保留旧文件和截断文件不落成正式资源。
+
+当前状态：三个本机模型大小及哈希通过；资源附件上传中，本地九项脚本检查通过；云端编译、APK核验和真机结果待本轮实际完成后补写。AI规划服务不可用时保留本段待同步证据。
