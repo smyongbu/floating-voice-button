@@ -170,3 +170,6 @@ files/logs/错误.log
 - 回归：`python -B -m unittest discover -s scripts/tests -v`；Kotlin 单元测试覆盖内置模型安装、可信文件复用、坏哈希保留旧文件和截断文件不落成正式资源。
 
 当前状态：三个本机模型大小及哈希通过；资源附件上传中，本地九项脚本检查通过；云端编译、APK核验和真机结果待本轮实际完成后补写。AI规划服务不可用时保留本段待同步证据。
+
+
+本轮发现历史 Actions Artifact 存储配额已满；APK 和校验文件改存到同一 GitHub 模型资源页，不开通付费配额。

@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -93,11 +93,8 @@ jobs:
           cp "$APK" "android-app/发布/${NAME}.apk"
           sha256sum "android-app/发布/${NAME}.apk" >> "android-app/发布/${NAME}-校验.txt"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
-      - name: 保存安装包
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.delivery.outputs.name }}
-          compression-level: 0
-          path: android-app/发布/*
-          if-no-files-found: error
-          retention-days: 7
+      - name: 保存安装包到 GitHub 资源页
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload voice-bundled-models-v1 android-app/发布/* --repo "$GITHUB_REPOSITORY" --clobber
