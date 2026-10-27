@@ -1,6 +1,6 @@
 # Android 第三方软件与模型说明
 
-本文件记录 Android App 实际使用的识别运行库和五套按需下载模型。模型不进入 Git 或 APK；精确字节数和 SHA-256 与 `app/src/main/assets/model-resources.json` 保持一致。
+本文件记录 Android App 实际使用的识别运行库和三套模型。本次自带模型版本将三套资源内置于 APK；权重通过 GitHub 资源附件分发，不进入源码 Git 历史。精确字节数和 SHA-256 与 `app/src/main/assets/model-resources.json` 保持一致。
 
 ## sherpa-onnx
 
@@ -75,4 +75,9 @@ SOFTWARE.
 - 校验：1,517,290,464 字节；SHA-256 `034c557fe92ff8fcd9a9c041cbdaad347be0a86a58d3a348f63cf3f0180879d0`
 - 使用范围：由 `transcribe.cpp` 读取，在停止收音后生成最终文字。
 
-五套模型合计 3,071,402,319 字节（约 2.86 GiB），均由用户按需下载或经 ADB 按哈希增量同步到 App 私有资源目录。
+三套模型合计 2,024,244,101 字节（约 1.89 GiB）。自带模型版首次启动从 APK 本地安装至 App 私有资源目录，轻量版保留按需下载或 ADB 增量同步方式。Apache-2.0 完整文本随包保存在 `Apache-2.0.txt`。
+
+
+## Whisper 上游许可
+
+Whisper Small 来自 OpenAI Whisper。GGUF 发布页标注 Apache-2.0，原始 Whisper 上游许可证为 MIT；保留上游 Copyright (c) 2022 OpenAI 及完整许可文本，随包保存在 `OpenAI-Whisper-MIT.txt`。官方来源：https://github.com/openai/whisper/blob/main/LICENSE 。
